@@ -10,28 +10,40 @@ import (
 	"syscall"
 	"time"
 
+	"facets.barnlab.dev/internal/cli"
+	"facets.barnlab.dev/internal/project"
+	"facets.barnlab.dev/internal/project/kata"
 	"facets.barnlab.dev/internal/web"
 )
 
 func main() {
-	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
-	if err := run(logger); err != nil {
-		logger.Error("server stopped", "error", err)
+	logger := slog.New(slog.NewJSONHandler(os.Stderr, nil))
+	registry := project.NewRegistry()
+	if err := registry.Register(kata.New(kata.Config{})); err != nil {
+		logger.Error("configure provider", "error", err)
 		os.Exit(1)
 	}
+
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	app := cli.App{
+		Registry: registry,
+		Stdout:   os.Stdout,
+		Stderr:   os.Stderr,
+		Getenv:   os.Getenv,
+		Serve: func(ctx context.Context, address string) error {
+			return runServer(ctx, address, logger)
+		},
+	}
+	os.Exit(app.Run(ctx, os.Args[1:]))
 }
 
-func run(logger *slog.Logger) error {
+func runServer(ctx context.Context, address string, logger *slog.Logger) error {
 	handler, err := web.New(logger)
 	if err != nil {
 		return err
 	}
-
-	address := os.Getenv("FACETS_ADDR")
-	if address == "" {
-		address = ":8080"
-	}
-
 	server := &http.Server{
 		Addr:              address,
 		Handler:           handler,
@@ -41,9 +53,6 @@ func run(logger *slog.Logger) error {
 		IdleTimeout:       2 * time.Minute,
 		ErrorLog:          slog.NewLogLogger(logger.Handler(), slog.LevelError),
 	}
-
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
 
 	serverErrors := make(chan error, 1)
 	go func() {
