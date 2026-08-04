@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <meta name="theme-color" content="#eef2e8">
+  <title>{{.Status}} · {{.Title}} · Facets</title>
+  <link rel="stylesheet" href="/assets/app.css">
+</head>
+<body>
+  <a class="skip-link" href="#error-content">Skip to error details</a>
+
+  <div class="error-page">
+    <header class="topbar">
+      <a class="brand" href="/" aria-label="Facets home">
+        <span class="brand-mark" aria-hidden="true">
+          <span></span><span></span><span></span><span></span>
+        </span>
+        <span class="brand-name">Facets</span>
+      </a>
+      <span class="error-utility">Request interrupted</span>
+    </header>
+
+    <main id="error-content" class="error-workspace" tabindex="-1">
+      <div class="error-code" aria-label="Error status {{.Status}}">{{.Status}}</div>
+      <section class="error-copy" aria-labelledby="error-title">
+        <p class="overline">System response</p>
+        <h1 id="error-title">{{.Title}}</h1>
+        <p>{{.Message}}</p>
+        <div class="error-actions">
+          <a class="button button--primary" href="/">Return to Projects</a>
+          <button class="button button--secondary" type="button" onclick="window.location.reload()">Try this page again</button>
+        </div>
+      </section>
+      <p class="error-note">If the problem continues, return to the dashboard and try the action again.</p>
+    </main>
+
+    <footer class="site-footer">
+      <span>Facets</span>
+      <span>Personal dashboard</span>
+    </footer>
+  </div>
+</body>
+</html>
+
+{{define "error-partial"}}
+<div class="system-message-copy">
+  <strong>{{.Title}}</strong>
+  <span>{{.Message}}</span>
+</div>
+<div class="system-message-actions">
+  <span class="system-message-status">Error {{.Status}}</span>
+  <button class="message-dismiss" type="button" data-system-dismiss aria-label="Dismiss error">Dismiss</button>
+</div>
+{{end}}

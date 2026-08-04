@@ -1,0 +1,237 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <meta name="theme-color" content="#eef2e8">
+  <title>Projects · Facets</title>
+  <link rel="stylesheet" href="/assets/app.css">
+  <script defer src="https://cdn.jsdelivr.net/npm/htmx.org@2.0.4/dist/htmx.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.8/dist/cdn.min.js"></script>
+</head>
+<body x-data="{ navOpen: false, focusMode: false }" @keydown.escape.window="navOpen = false; focusMode = false">
+  <a class="skip-link" href="#main-content">Skip to project overview</a>
+
+  <div class="dashboard" :class="{ 'is-focus-mode': focusMode }">
+    <header class="topbar">
+      <a class="brand" href="/" aria-label="Facets home">
+        <span class="brand-mark" aria-hidden="true">
+          <span></span><span></span><span></span><span></span>
+        </span>
+        <span class="brand-name">Facets</span>
+      </a>
+
+      <div class="topbar-utility" aria-label="Dashboard utilities">
+        <div
+          id="service-status"
+          class="status-slot"
+          hx-get="/partials/status"
+          hx-trigger="load"
+          hx-swap="innerHTML"
+          aria-live="polite"
+          aria-atomic="true"
+        >
+          <span class="status-pill status-pill--pending">
+            <span class="status-dot" aria-hidden="true"></span>
+            Checking connection…
+          </span>
+        </div>
+
+        <button
+          class="utility-button focus-toggle"
+          type="button"
+          @click="focusMode = !focusMode; navOpen = false"
+          :aria-pressed="focusMode.toString()"
+        >
+          <svg aria-hidden="true" viewBox="0 0 24 24" focusable="false">
+            <path d="M8 3H3v5M16 3h5v5M8 21H3v-5M16 21h5v-5"></path>
+          </svg>
+          <span x-text="focusMode ? 'Exit focus' : 'Focus mode'">Focus mode</span>
+        </button>
+
+        <button
+          class="utility-button nav-toggle"
+          type="button"
+          aria-controls="primary-navigation"
+          aria-label="Toggle dashboard navigation"
+          :aria-expanded="navOpen.toString()"
+          @click="navOpen = !navOpen"
+        >
+          <svg aria-hidden="true" viewBox="0 0 24 24" focusable="false">
+            <path d="M4 7h16M4 12h16M4 17h16"></path>
+          </svg>
+          <span>Menu</span>
+        </button>
+      </div>
+    </header>
+
+    <div
+      id="system-message"
+      class="system-message"
+      role="alert"
+      aria-live="assertive"
+      aria-atomic="true"
+      hidden
+    >
+      <div>
+        <strong>Connection problem</strong>
+        <span data-system-message>Facets could not complete that request. Please try again.</span>
+      </div>
+      <button class="message-dismiss" type="button" data-system-dismiss aria-label="Dismiss error">Dismiss</button>
+    </div>
+
+    <noscript>
+      <div class="system-message system-message--static" role="status">
+        <div>
+          <strong>JavaScript is unavailable</strong>
+          <span>Live status and dashboard controls require JavaScript.</span>
+        </div>
+      </div>
+    </noscript>
+
+    <div class="shell-grid">
+      <aside class="navigation-rail" :class="{ 'is-open': navOpen }">
+        <div class="navigation-heading">
+          <p class="overline">Perspective</p>
+          <p class="navigation-title">Your dashboard</p>
+        </div>
+
+        <nav id="primary-navigation" class="primary-navigation" aria-label="Facets">
+          <a class="nav-item is-active" href="/" aria-current="page" @click="navOpen = false">
+            <span class="nav-index">01</span>
+            <span class="nav-label">Projects</span>
+            <span class="nav-state">Active</span>
+          </a>
+          <span class="nav-item is-planned" aria-disabled="true">
+            <span class="nav-index">02</span>
+            <span class="nav-label">Finances</span>
+            <span class="nav-state">Planned</span>
+          </span>
+          <span class="nav-item is-planned" aria-disabled="true">
+            <span class="nav-index">03</span>
+            <span class="nav-label">Goals</span>
+            <span class="nav-state">Planned</span>
+          </span>
+          <span class="nav-item is-planned" aria-disabled="true">
+            <span class="nav-index">04</span>
+            <span class="nav-label">Life</span>
+            <span class="nav-state">Planned</span>
+          </span>
+        </nav>
+
+        <div class="rail-note">
+          <span class="rail-note-label">Current lens</span>
+          <p>Projects brings active work, open tasks, and recent sessions into one view.</p>
+        </div>
+      </aside>
+
+      <main id="main-content" class="workspace" tabindex="-1">
+        <header class="workspace-header">
+          <div>
+            <p class="overline">Projects / Overview</p>
+            <h1>Make active work legible.</h1>
+          </div>
+          <p class="workspace-intro">A focused home for the projects you choose to track. Add the first project to begin connecting work, tasks, and session history.</p>
+        </header>
+
+        <div class="workspace-grid">
+          <section class="project-panel" aria-labelledby="project-panel-title">
+            <header class="section-heading">
+              <div>
+                <p class="overline">Project collection</p>
+                <h2 id="project-panel-title">No projects yet</h2>
+              </div>
+              <span class="section-marker" aria-hidden="true">01</span>
+            </header>
+
+            <div class="empty-projects">
+              <div class="empty-projects-copy">
+                <svg class="empty-symbol" aria-hidden="true" viewBox="0 0 48 48" focusable="false">
+                  <path d="M7 12.5h12l4 5H41v23H7z"></path>
+                  <path d="M7 23h34"></path>
+                </svg>
+                <div>
+                  <h3>Start with one real project</h3>
+                  <p>Projects are added intentionally through the <code>facet</code> command-line tool. Once connected, this space will show its tasks and recent work without inventing activity.</p>
+                </div>
+              </div>
+              <p class="empty-footnote">Nothing is hidden or still loading. This workspace is ready for its first project.</p>
+            </div>
+          </section>
+
+          <aside class="context-panel" aria-labelledby="context-panel-title">
+            <header class="section-heading section-heading--compact">
+              <div>
+                <p class="overline">Workspace guide</p>
+                <h2 id="context-panel-title">What appears here</h2>
+              </div>
+              <span class="section-marker" aria-hidden="true">02</span>
+            </header>
+
+            <ol class="guide-list">
+              <li>
+                <span class="guide-index">A</span>
+                <div>
+                  <h3>Selected work</h3>
+                  <p>The projects you explicitly add to Facets.</p>
+                </div>
+              </li>
+              <li>
+                <span class="guide-index">B</span>
+                <div>
+                  <h3>Open tasks</h3>
+                  <p>Current work from each project’s configured task source.</p>
+                </div>
+              </li>
+              <li>
+                <span class="guide-index">C</span>
+                <div>
+                  <h3>Recent sessions</h3>
+                  <p>Work history grouped by project and period.</p>
+                </div>
+              </li>
+            </ol>
+
+            <div class="focus-note">
+              <p class="overline">Need less chrome?</p>
+              <p>Use <strong>Focus mode</strong> in the utility bar to hide navigation and keep the overview in view.</p>
+            </div>
+          </aside>
+        </div>
+      </main>
+    </div>
+
+    <footer class="site-footer">
+      <span>Facets</span>
+      <span>Personal dashboard · {{.Year}}</span>
+    </footer>
+  </div>
+
+  <script>
+    (() => {
+      const systemMessage = document.getElementById('system-message');
+
+      const showRequestError = (event) => {
+        const messageText = systemMessage.querySelector('[data-system-message]');
+        if (messageText) {
+          const isSendError = event.type === 'htmx:sendError';
+          messageText.textContent = isSendError
+            ? 'Facets could not reach the server. Check the connection and try again.'
+            : 'Facets received an unsuccessful response. Please try again.';
+        }
+        systemMessage.hidden = false;
+        console.error('Facets HTMX request failed', event.detail);
+      };
+
+      document.body.addEventListener('htmx:responseError', showRequestError);
+      document.body.addEventListener('htmx:sendError', showRequestError);
+      systemMessage.addEventListener('click', (event) => {
+        if (event.target.closest('[data-system-dismiss]')) {
+          systemMessage.hidden = true;
+        }
+      });
+    })();
+  </script>
+</body>
+</html>
