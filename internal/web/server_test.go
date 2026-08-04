@@ -119,6 +119,24 @@ func TestMissingViewReturnsStandaloneError(t *testing.T) {
 	}
 }
 
+func TestKnownRouteRejectsUnsupportedMethod(t *testing.T) {
+	t.Parallel()
+
+	handler := newTestHandler(t, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, httptest.NewRequest(http.MethodPost, "/", nil))
+
+	if response.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("POST / status = %d, want %d", response.Code, http.StatusMethodNotAllowed)
+	}
+	if allow := response.Header().Get("Allow"); allow != "GET, HEAD" {
+		t.Fatalf("POST / Allow = %q, want %q", allow, "GET, HEAD")
+	}
+	if !strings.Contains(response.Body.String(), "Method not allowed") {
+		t.Fatalf("POST / body = %q", response.Body.String())
+	}
+}
+
 func TestRequestsAreLogged(t *testing.T) {
 	t.Parallel()
 

@@ -7,8 +7,10 @@
   <meta name="theme-color" content="#eef2e8">
   <title>Projects · Facets</title>
   <link rel="stylesheet" href="/assets/app.css">
-  <script defer src="https://cdn.jsdelivr.net/npm/htmx.org@2.0.4/dist/htmx.min.js"></script>
-  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.8/dist/cdn.min.js"></script>
+  <link rel="icon" href="/assets/favicon.svg" type="image/svg+xml">
+  <meta name="htmx-config" content='{"responseHandling":[{"code":"204","swap":false},{"code":"[23]..","swap":true},{"code":"[45]..","swap":true,"error":true},{"code":"...","swap":false,"error":true}]}'>
+  <script defer src="https://cdn.jsdelivr.net/npm/htmx.org@2.0.10/dist/htmx.min.js" integrity="sha384-H5SrcfygHmAuTDZphMHqBJLc3FhssKjG7w/CeCpFReSfwBWDTKpkzPP8c+cLsK+V" crossorigin="anonymous"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.15.12/dist/cdn.min.js" integrity="sha384-pb6hrQvo4s23cEUFtj0CZkzGE3jyK3pj26RIupXXxhSrrcUA/Cn0lZgcCrGH0t6L" crossorigin="anonymous"></script>
 </head>
 <body x-data="{ navOpen: false, focusMode: false }" @keydown.escape.window="navOpen = false; focusMode = false">
   <a class="skip-link" href="#main-content">Skip to project overview</a>
@@ -75,7 +77,7 @@
       hidden
     >
       <div>
-        <strong>Connection problem</strong>
+        <strong data-system-title>Connection problem</strong>
         <span data-system-message>Facets could not complete that request. Please try again.</span>
       </div>
       <button class="message-dismiss" type="button" data-system-dismiss aria-label="Dismiss error">Dismiss</button>
@@ -213,12 +215,14 @@
       const systemMessage = document.getElementById('system-message');
 
       const showRequestError = (event) => {
-        const messageText = systemMessage.querySelector('[data-system-message]');
-        if (messageText) {
-          const isSendError = event.type === 'htmx:sendError';
-          messageText.textContent = isSendError
-            ? 'Facets could not reach the server. Check the connection and try again.'
-            : 'Facets received an unsuccessful response. Please try again.';
+        const isSendError = event.type === 'htmx:sendError';
+        if (isSendError) {
+          const messageTitle = systemMessage.querySelector('[data-system-title]');
+          const messageText = systemMessage.querySelector('[data-system-message]');
+          const messageStatus = systemMessage.querySelector('[data-system-status]');
+          if (messageTitle) messageTitle.textContent = 'Connection problem';
+          if (messageText) messageText.textContent = 'Facets could not reach the server. Check the connection and try again.';
+          if (messageStatus) messageStatus.textContent = 'Network error';
         }
         systemMessage.hidden = false;
         console.error('Facets HTMX request failed', event.detail);

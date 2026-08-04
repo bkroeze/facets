@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strconv"
+	"strings"
 	"sync/atomic"
 	"time"
 )
@@ -38,7 +39,7 @@ func New(logger *slog.Logger) (http.Handler, error) {
 	mux.HandleFunc("GET /{$}", s.index)
 	mux.HandleFunc("GET /partials/status", s.status)
 	mux.HandleFunc("GET /healthz", s.health)
-	mux.HandleFunc("/", s.notFound)
+	mux.HandleFunc("/", s.fallback)
 	return s.observe(mux), nil
 }
 
@@ -84,6 +85,24 @@ func (s *server) health(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+func (s *server) fallback(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet && r.Method != http.MethodHead && knownGetPath(r.URL.Path) {
+		w.Header().Set("Allow", "GET, HEAD")
+		s.respondError(w, r, http.StatusMethodNotAllowed, "Method not allowed", "This Facets view only accepts read requests.", nil)
+		return
+	}
+	s.notFound(w, r)
+}
+
+func knownGetPath(path string) bool {
+	switch path {
+	case "/", "/partials/status", "/healthz":
+		return true
+	default:
+		return strings.HasPrefix(path, "/assets/")
+	}
+}
+
 func (s *server) notFound(w http.ResponseWriter, r *http.Request) {
 	s.respondError(w, r, http.StatusNotFound, "View not found", "The requested Facets view does not exist.", nil)
 }
@@ -108,7 +127,11 @@ func (s *server) respondError(w http.ResponseWriter, r *http.Request, status int
 	if cause != nil {
 		attributes = append(attributes, "error", cause)
 	}
-	s.logger.ErrorContext(r.Context(), "http request failed", attributes...)
+	if status >= http.StatusInternalServerError {
+		s.logger.ErrorContext(r.Context(), "http request failed", attributes...)
+	} else {
+		s.logger.WarnContext(r.Context(), "http request rejected", attributes...)
+	}
 
 	templateName := "error.html"
 	if r.Header.Get("HX-Request") == "true" {

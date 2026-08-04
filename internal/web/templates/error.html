@@ -7,6 +7,7 @@
   <meta name="theme-color" content="#eef2e8">
   <title>{{.Status}} · {{.Title}} · Facets</title>
   <link rel="stylesheet" href="/assets/app.css">
+  <link rel="icon" href="/assets/favicon.svg" type="image/svg+xml">
 </head>
 <body>
   <a class="skip-link" href="#error-content">Skip to error details</a>
@@ -46,11 +47,11 @@
 
 {{define "error-partial"}}
 <div class="system-message-copy">
-  <strong>{{.Title}}</strong>
-  <span>{{.Message}}</span>
+  <strong data-system-title>{{.Title}}</strong>
+  <span data-system-message>{{.Message}}</span>
 </div>
 <div class="system-message-actions">
-  <span class="system-message-status">Error {{.Status}}</span>
+  <span class="system-message-status" data-system-status>Error {{.Status}}</span>
   <button class="message-dismiss" type="button" data-system-dismiss aria-label="Dismiss error">Dismiss</button>
 </div>
 {{end}}
