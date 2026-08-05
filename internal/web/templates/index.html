@@ -159,6 +159,27 @@
                       <code>{{.ID}}</code>
                     </p>
                   </header>
+                  {{if .Summary}}
+                  <section class="project-summary" aria-label="Project status summary">
+                    <p class="project-summary-period">Last {{.Summary.PeriodDays}} days</p>
+                    <dl class="project-summary-metrics">
+                      <div><dt>Open</dt><dd>{{.Summary.Tasks.Open}}</dd></div>
+                      <div><dt>Closed</dt><dd>{{.Summary.Tasks.Closed}}</dd></div>
+                      <div><dt>Codex sessions</dt><dd>{{index .Summary.Activity.Sessions "codex"}}</dd></div>
+                      <div><dt>OMP sessions</dt><dd>{{index .Summary.Activity.Sessions "omp"}}</dd></div>
+                    </dl>
+                    <div class="project-priorities">
+                      <p>Open by priority</p>
+                      <ul>
+                        <li>P0 <strong>{{index .Summary.Tasks.OpenByPriority 0}}</strong></li>
+                        <li>P1 <strong>{{index .Summary.Tasks.OpenByPriority 1}}</strong></li>
+                        <li>P2 <strong>{{index .Summary.Tasks.OpenByPriority 2}}</strong></li>
+                        <li>P3 <strong>{{index .Summary.Tasks.OpenByPriority 3}}</strong></li>
+                        <li>P4 <strong>{{index .Summary.Tasks.OpenByPriority 4}}</strong></li>
+                      </ul>
+                    </div>
+                  </section>
+                  {{end}}
                   {{if .Description}}
                   <p class="project-description">{{.Description}}</p>
                   {{end}}

@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"facets.barnlab.dev/internal/project"
+	"facets.barnlab.dev/internal/status"
 )
 
 //go:embed templates/*.html assets/*
@@ -29,14 +30,23 @@ type ProjectSource interface {
 }
 
 // New returns the Facets HTTP handler.
-func New(logger *slog.Logger, projects ProjectSource) (http.Handler, error) {
+func New(logger *slog.Logger, projects ProjectSource, providers ...project.Provider) (http.Handler, error) {
 	if logger == nil {
 		logger = slog.Default()
 	}
 	if isNilProjectSource(projects) {
 		return nil, errors.New("web: project source is required")
 	}
-
+	if len(providers) > 1 {
+		return nil, errors.New("web: only one project provider is supported")
+	}
+	var provider project.Provider
+	if len(providers) == 1 {
+		if isNilProjectSource(providers[0]) {
+			return nil, errors.New("web: project provider is required")
+		}
+		provider = providers[0]
+	}
 	templates, err := template.ParseFS(content, "templates/*.html")
 	if err != nil {
 		return nil, fmt.Errorf("web: parse templates: %w", err)
@@ -46,7 +56,10 @@ func New(logger *slog.Logger, projects ProjectSource) (http.Handler, error) {
 		return nil, fmt.Errorf("web: load assets: %w", err)
 	}
 
-	s := &server{logger: logger, projects: projects, templates: templates}
+	s := &server{
+		logger: logger, projects: projects, provider: provider,
+		summarizer: status.NewBuilder(), templates: templates,
+	}
 	mux := http.NewServeMux()
 	mux.Handle("GET /assets/", http.StripPrefix("/assets/", http.FileServer(http.FS(assets))))
 	mux.HandleFunc("GET /{$}", s.index)
@@ -57,15 +70,22 @@ func New(logger *slog.Logger, projects ProjectSource) (http.Handler, error) {
 }
 
 type server struct {
-	logger    *slog.Logger
-	projects  ProjectSource
-	templates *template.Template
-	requests  atomic.Uint64
+	logger     *slog.Logger
+	projects   ProjectSource
+	provider   project.Provider
+	summarizer *status.Builder
+	templates  *template.Template
+	requests   atomic.Uint64
+}
+
+type projectView struct {
+	project.Project
+	Summary *status.Summary
 }
 
 type pageData struct {
 	Year     int
-	Projects []project.Project
+	Projects []projectView
 }
 
 type statusData struct {
@@ -97,7 +117,19 @@ func (s *server) index(w http.ResponseWriter, r *http.Request) {
 		s.respondError(w, r, http.StatusBadGateway, "Projects unavailable", "Facets could not load projects from the configured provider. Try again shortly.", err)
 		return
 	}
-	data := pageData{Year: time.Now().UTC().Year(), Projects: projects}
+	views := make([]projectView, len(projects))
+	for i, item := range projects {
+		views[i] = projectView{Project: item}
+		if s.provider != nil {
+			summary, err := s.summarizer.Build(r.Context(), s.provider, ".", item.ID)
+			if err != nil {
+				s.respondError(w, r, http.StatusBadGateway, "Project status unavailable", "Facets could not summarize project activity. Try again shortly.", err)
+				return
+			}
+			views[i].Summary = &summary
+		}
+	}
+	data := pageData{Year: time.Now().UTC().Year(), Projects: views}
 	if err := s.render(w, http.StatusOK, "index.html", data); err != nil {
 		s.respondError(w, r, http.StatusInternalServerError, "Dashboard unavailable", "Facets could not render this view. Try again shortly.", err)
 	}

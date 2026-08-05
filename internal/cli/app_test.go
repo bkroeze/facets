@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"facets.barnlab.dev/internal/project"
+	"facets.barnlab.dev/internal/status"
 )
 
 type fakeProvider struct {
@@ -97,7 +98,23 @@ func (f *fakeProvider) DeleteTask(_ context.Context, projectID, id string) error
 
 func runCLI(provider *fakeProvider, cwd string, env map[string]string, args ...string) (int, string, string) {
 	var stdout, stderr bytes.Buffer
-	app := App{Provider: provider, Stdout: &stdout, Stderr: &stderr, Cwd: cwd, Env: env, Executable: "/opt/facets/bin/facets"}
+	app := App{Provider: provider, Summary: &status.Builder{Activity: fakeActivitySource{}, Now: time.Now, PeriodDays: 30}, Stdout: &stdout, Stderr: &stderr, Cwd: cwd, Env: env, Executable: "/opt/facets/bin/facets"}
+	code := app.Run(context.Background(), args)
+	return code, stdout.String(), stderr.String()
+}
+
+type fakeActivitySource struct {
+	activity status.Activity
+	err      error
+}
+
+func (f fakeActivitySource) Summarize(_ context.Context, _ string, _ time.Time) (status.Activity, error) {
+	return f.activity, f.err
+}
+
+func runCLIWithSummary(provider *fakeProvider, cwd string, builder *status.Builder, args ...string) (int, string, string) {
+	var stdout, stderr bytes.Buffer
+	app := App{Provider: provider, Summary: builder, Stdout: &stdout, Stderr: &stderr, Cwd: cwd, Env: map[string]string{}, Executable: "/opt/facets/bin/facets"}
 	code := app.Run(context.Background(), args)
 	return code, stdout.String(), stderr.String()
 }
@@ -420,6 +437,77 @@ func TestServeDispatchUsesFlagAndEnvironment(t *testing.T) {
 	}
 	if stdout.Len() != 0 || stderr.Len() != 0 {
 		t.Fatalf("channels stdout=%q stderr=%q", stdout.String(), stderr.String())
+	}
+}
+
+func TestProjectShowIncludesDeterministicStatusSummary(t *testing.T) {
+	root := t.TempDir()
+	openPriority := 1
+	closedPriority := 3
+	provider := &fakeProvider{
+		projects: []project.Project{{ID: "demo", Name: "Demo"}},
+		tasks: []project.Task{
+			{ID: "T-open-priority", ProjectID: "demo", Status: project.StatusOpen, Priority: &openPriority},
+			{ID: "T-open", ProjectID: "demo", Status: project.StatusOpen},
+			{ID: "T-closed", ProjectID: "demo", Status: project.StatusClosed, Priority: &closedPriority},
+		},
+	}
+	builder := &status.Builder{
+		Activity:   fakeActivitySource{activity: status.Activity{Commits: 7, Sessions: map[string]int{"codex": 2, "omp": 4, "other": 99}}},
+		Now:        func() time.Time { return time.Date(2026, 8, 31, 12, 0, 0, 0, time.UTC) },
+		PeriodDays: 30,
+	}
+	code, stdout, stderr := runCLIWithSummary(provider, root, builder, "projects", "show", "demo")
+	if code != 0 || stderr != "" || !strings.Contains(stdout, "status:\n  period_days: 30\n") || !strings.Contains(stdout, "commits: 7") || !strings.Contains(stdout, "codex: 2") {
+		t.Fatalf("TOON show code=%d stderr=%q stdout=%s", code, stderr, stdout)
+	}
+	code, stdout, stderr = runCLIWithSummary(provider, root, builder, "--json", "projects", "show", "demo")
+	if code != 0 || stderr != "" {
+		t.Fatalf("JSON show code=%d stderr=%q stdout=%s", code, stderr, stdout)
+	}
+	var decoded struct {
+		Status struct {
+			PeriodDays int    `json:"period_days"`
+			Since      string `json:"since"`
+			Tasks      struct {
+				Total            int            `json:"total"`
+				Open             int            `json:"open"`
+				Closed           int            `json:"closed"`
+				OpenByPriority   map[string]any `json:"open_by_priority"`
+				ClosedByPriority map[string]any `json:"closed_by_priority"`
+			} `json:"tasks"`
+			Activity struct {
+				Commits  int            `json:"commits"`
+				Sessions map[string]any `json:"sessions"`
+			} `json:"activity"`
+		} `json:"status"`
+	}
+	if err := json.Unmarshal([]byte(stdout), &decoded); err != nil {
+		t.Fatalf("invalid JSON: %v\n%s", err, stdout)
+	}
+	if decoded.Status.PeriodDays != 30 || decoded.Status.Since != "2026-08-01T12:00:00Z" {
+		t.Fatalf("period = %#v", decoded.Status)
+	}
+	if decoded.Status.Tasks.Total != 3 || decoded.Status.Tasks.Open != 2 || decoded.Status.Tasks.Closed != 1 ||
+		decoded.Status.Tasks.OpenByPriority["1"] != float64(1) || decoded.Status.Tasks.ClosedByPriority["3"] != float64(1) {
+		t.Fatalf("tasks = %#v", decoded.Status.Tasks)
+	}
+	if decoded.Status.Activity.Commits != 7 || decoded.Status.Activity.Sessions["codex"] != float64(2) || decoded.Status.Activity.Sessions["omp"] != float64(4) {
+		t.Fatalf("activity = %#v", decoded.Status.Activity)
+	}
+}
+
+func TestProjectShowStatusFailureIsOperational(t *testing.T) {
+	root := t.TempDir()
+	provider := &fakeProvider{projects: []project.Project{{ID: "demo", Name: "Demo"}}}
+	builder := &status.Builder{
+		Activity:   fakeActivitySource{err: errors.New("activity unavailable")},
+		Now:        func() time.Time { return time.Date(2026, 8, 31, 12, 0, 0, 0, time.UTC) },
+		PeriodDays: 30,
+	}
+	code, stdout, stderr := runCLIWithSummary(provider, root, builder, "--json", "projects", "show", "demo")
+	if code != 1 || stderr != "" || !strings.Contains(stdout, `"type":"operational"`) || strings.Contains(stdout, `"project"`) {
+		t.Fatalf("failure code=%d stderr=%q stdout=%s", code, stderr, stdout)
 	}
 }
 

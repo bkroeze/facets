@@ -91,8 +91,8 @@ func projectsListHelp() object {
 	return helpDocument("facets projects list", "List projects available from the selected provider", table{columns: []string{"name", "default", "description"}}, primitiveArray{"facets projects list", "facets --json projects list"}, nil)
 }
 func projectShowHelp() object {
-	return helpDocument("facets projects show <id>", "Show one project",
-		table{columns: []string{"name", "default", "description"}, rows: [][]any{{"<id>", "required", "project ID"}}}, primitiveArray{"facets projects show thornwear"}, nil)
+	return helpDocument("facets projects show <id>", "Show one project with a 30-day task and activity summary",
+		table{columns: []string{"name", "default", "description"}, rows: [][]any{{"<id>", "required", "project ID"}, {"summary period", "30 days", "task and recent activity window"}}}, primitiveArray{"facets projects show thornwear"}, nil)
 }
 func serveHelp(address string) object {
 	return helpDocument("facets serve [--addr <address>]", "Run the facets web server",

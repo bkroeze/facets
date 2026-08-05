@@ -9,12 +9,14 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
 	"unicode/utf8"
 
 	"facets.barnlab.dev/internal/project"
+	"facets.barnlab.dev/internal/status"
 )
 
 var errProjectNotDiscovered = errors.New("project not discovered")
@@ -25,6 +27,7 @@ var errProjectNotDiscovered = errors.New("project not discovered")
 type App struct {
 	Registry   *project.Registry
 	Provider   project.Provider
+	Summary    *status.Builder
 	Stdout     io.Writer
 	Stderr     io.Writer
 	Cwd        string
@@ -532,7 +535,21 @@ func (a *App) runProjects(ctx context.Context, stdout, stderr io.Writer, cfg run
 		if err != nil {
 			return a.providerError(stdout, stderr, cfg.format, fmt.Sprintf("could not show project %q", args[1]), err, fmt.Sprintf("Verify the ID with `%s projects list`", selectedFacetsCommand(cfg)))
 		}
-		a.write(stdout, cfg.format, projectDocument(item))
+		builder := a.Summary
+		if builder == nil {
+			builder = status.NewBuilder()
+		}
+		root := a.Cwd
+		if strings.TrimSpace(root) == "" {
+			root = "."
+		}
+		summary, err := builder.Build(ctx, provider, root, args[1])
+		if err != nil {
+			return a.providerError(stdout, stderr, cfg.format, fmt.Sprintf("could not summarize project %q", args[1]), err, fmt.Sprintf("Retry `%s projects show %s`", selectedFacetsCommand(cfg), shellQuote(args[1])))
+		}
+		doc := projectDocument(item)
+		doc = append(doc, field{name: "status", value: statusDocument(summary)})
+		a.write(stdout, cfg.format, doc)
 		return 0
 	default:
 		a.usageError(stdout, cfg.format, fmt.Sprintf("unknown projects command %q", args[0]), "Run `facets projects --help`")
@@ -814,6 +831,43 @@ func taskDocument(task project.Task, full bool, taskCommand string) object {
 
 func projectDocument(item project.Project) object {
 	return object{{name: "project", value: object{{name: "id", value: item.ID}, {name: "name", value: item.Name}, {name: "description", value: item.Description}, {name: "created", value: formatTime(item.CreatedAt)}, {name: "updated", value: formatTime(item.UpdatedAt)}}}}
+}
+
+func statusDocument(summary status.Summary) object {
+	return object{
+		{name: "period_days", value: summary.PeriodDays},
+		{name: "since", value: formatTime(summary.Since)},
+		{name: "tasks", value: object{
+			{name: "total", value: summary.Tasks.Total},
+			{name: "open", value: summary.Tasks.Open},
+			{name: "closed", value: summary.Tasks.Closed},
+			{name: "open_by_priority", value: priorityCounts(summary.Tasks.OpenByPriority)},
+			{name: "closed_by_priority", value: priorityCounts(summary.Tasks.ClosedByPriority)},
+		}},
+		{name: "activity", value: object{
+			{name: "commits", value: summary.Activity.Commits},
+			{name: "sessions", value: object{
+				{name: "codex", value: summary.Activity.Sessions["codex"]},
+				{name: "omp", value: summary.Activity.Sessions["omp"]},
+			}},
+		}},
+	}
+}
+
+func priorityCounts(counts map[int]int) object {
+	if len(counts) == 0 {
+		return object{}
+	}
+	priorities := make([]int, 0, len(counts))
+	for priority := range counts {
+		priorities = append(priorities, priority)
+	}
+	sort.Ints(priorities)
+	countsObject := make(object, 0, len(priorities))
+	for _, priority := range priorities {
+		countsObject = append(countsObject, field{name: strconv.Itoa(priority), value: counts[priority]})
+	}
+	return countsObject
 }
 func priorityValue(value *int) any {
 	if value == nil {

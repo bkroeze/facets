@@ -34,14 +34,14 @@ func main() {
 		Stderr:   os.Stderr,
 		Getenv:   os.Getenv,
 		Serve: func(ctx context.Context, address string) error {
-			return runServer(ctx, address, logger, provider)
+			return runServer(ctx, address, logger, provider, provider)
 		},
 	}
 	os.Exit(app.Run(ctx, os.Args[1:]))
 }
 
-func runServer(ctx context.Context, address string, logger *slog.Logger, projects web.ProjectSource) error {
-	handler, err := web.New(logger, projects)
+func runServer(ctx context.Context, address string, logger *slog.Logger, projects web.ProjectSource, provider project.Provider) error {
+	handler, err := web.New(logger, projects, provider)
 	if err != nil {
 		return err
 	}
