@@ -219,7 +219,10 @@ func (localActivitySource) Summarize(ctx context.Context, root string, since tim
 	if err != nil {
 		return Activity{}, fmt.Errorf("status: count Codex sessions: %w", err)
 	}
-	omp, err := countSessionDatabase(ctx, ompHome, filepath.Join("agent", "history.db"), "history", root, since)
+	omp, err := countSessionDatabaseCandidates(ctx, ompHome, []string{
+		filepath.Join("agent", "history.db"),
+		filepath.Join("agent", "history"),
+	}, "history", root, since)
 	if err != nil {
 		return Activity{}, fmt.Errorf("status: count OMP sessions: %w", err)
 	}
@@ -231,6 +234,20 @@ func (localActivitySource) Summarize(ctx context.Context, root string, since tim
 		codexSessionKey: codex,
 		ompSessionKey:   omp,
 	}}, nil
+}
+
+func countSessionDatabaseCandidates(ctx context.Context, home string, databaseNames []string, table, root string, since time.Time) (int, error) {
+	for _, databaseName := range databaseNames {
+		path := filepath.Join(strings.TrimSpace(home), databaseName)
+		if _, err := os.Stat(path); err != nil {
+			if os.IsNotExist(err) {
+				continue
+			}
+			return 0, fmt.Errorf("stat %s: %w", path, err)
+		}
+		return countSessionDatabase(ctx, home, databaseName, table, root, since)
+	}
+	return 0, nil
 }
 
 func countSessionDatabase(ctx context.Context, home, databaseName, table, root string, since time.Time) (int, error) {
