@@ -177,11 +177,15 @@ func createActivityDB(t *testing.T, path, table string, rows []activityRow) {
 		t.Fatal(err)
 	}
 	defer db.Close()
-	if _, err := db.Exec("CREATE TABLE " + table + " (cwd TEXT, created_at TEXT)"); err != nil {
+	timestampColumn := "created_at"
+	if table == "threads" {
+		timestampColumn = "created_at_ms"
+	}
+	if _, err := db.Exec("CREATE TABLE " + table + " (cwd TEXT, " + timestampColumn + " TEXT)"); err != nil {
 		t.Fatal(err)
 	}
 	for _, row := range rows {
-		if _, err := db.Exec("INSERT INTO "+table+" (cwd, created_at) VALUES (?, ?)", row.cwd, row.createdAt); err != nil {
+		if _, err := db.Exec("INSERT INTO "+table+" (cwd, "+timestampColumn+") VALUES (?, ?)", row.cwd, row.createdAt); err != nil {
 			t.Fatal(err)
 		}
 	}

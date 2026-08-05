@@ -215,14 +215,14 @@ func (localActivitySource) Summarize(ctx context.Context, root string, since tim
 			ompHome = filepath.Join(home, ".omp")
 		}
 	}
-	codex, err := countSessionDatabase(ctx, codexHome, "state_5.sqlite", "threads", root, since)
+	codex, err := countSessionDatabase(ctx, codexHome, "state_5.sqlite", "threads", "created_at_ms", root, since)
 	if err != nil {
 		return Activity{}, fmt.Errorf("status: count Codex sessions: %w", err)
 	}
 	omp, err := countSessionDatabaseCandidates(ctx, ompHome, []string{
 		filepath.Join("agent", "history.db"),
 		filepath.Join("agent", "history"),
-	}, "history", root, since)
+	}, "history", "created_at", root, since)
 	if err != nil {
 		return Activity{}, fmt.Errorf("status: count OMP sessions: %w", err)
 	}
@@ -236,7 +236,7 @@ func (localActivitySource) Summarize(ctx context.Context, root string, since tim
 	}}, nil
 }
 
-func countSessionDatabaseCandidates(ctx context.Context, home string, databaseNames []string, table, root string, since time.Time) (int, error) {
+func countSessionDatabaseCandidates(ctx context.Context, home string, databaseNames []string, table, timestampColumn, root string, since time.Time) (int, error) {
 	for _, databaseName := range databaseNames {
 		path := filepath.Join(strings.TrimSpace(home), databaseName)
 		if _, err := os.Stat(path); err != nil {
@@ -245,12 +245,12 @@ func countSessionDatabaseCandidates(ctx context.Context, home string, databaseNa
 			}
 			return 0, fmt.Errorf("stat %s: %w", path, err)
 		}
-		return countSessionDatabase(ctx, home, databaseName, table, root, since)
+		return countSessionDatabase(ctx, home, databaseName, table, timestampColumn, root, since)
 	}
 	return 0, nil
 }
 
-func countSessionDatabase(ctx context.Context, home, databaseName, table, root string, since time.Time) (int, error) {
+func countSessionDatabase(ctx context.Context, home, databaseName, table, timestampColumn, root string, since time.Time) (int, error) {
 	home = strings.TrimSpace(home)
 	if home == "" {
 		return 0, nil
@@ -274,7 +274,7 @@ func countSessionDatabase(ctx context.Context, home, databaseName, table, root s
 		return 0, fmt.Errorf("connect %s: %w", path, err)
 	}
 
-	rows, err := db.QueryContext(ctx, "SELECT cwd, created_at FROM "+table)
+	rows, err := db.QueryContext(ctx, "SELECT cwd, "+timestampColumn+" FROM "+table)
 	if err != nil {
 		return 0, fmt.Errorf("query %s: %w", path, err)
 	}
