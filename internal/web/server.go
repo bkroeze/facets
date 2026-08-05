@@ -2,26 +2,39 @@ package web
 
 import (
 	"bytes"
+	"context"
 	"embed"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"html/template"
 	"io/fs"
 	"log/slog"
 	"net/http"
+	"reflect"
 	"strconv"
 	"strings"
 	"sync/atomic"
 	"time"
+
+	"facets.barnlab.dev/internal/project"
 )
 
 //go:embed templates/*.html assets/*
 var content embed.FS
 
+// ProjectSource supplies the projects rendered by the dashboard.
+type ProjectSource interface {
+	ListProjects(context.Context) ([]project.Project, error)
+}
+
 // New returns the Facets HTTP handler.
-func New(logger *slog.Logger) (http.Handler, error) {
+func New(logger *slog.Logger, projects ProjectSource) (http.Handler, error) {
 	if logger == nil {
 		logger = slog.Default()
+	}
+	if isNilProjectSource(projects) {
+		return nil, errors.New("web: project source is required")
 	}
 
 	templates, err := template.ParseFS(content, "templates/*.html")
@@ -33,7 +46,7 @@ func New(logger *slog.Logger) (http.Handler, error) {
 		return nil, fmt.Errorf("web: load assets: %w", err)
 	}
 
-	s := &server{logger: logger, templates: templates}
+	s := &server{logger: logger, projects: projects, templates: templates}
 	mux := http.NewServeMux()
 	mux.Handle("GET /assets/", http.StripPrefix("/assets/", http.FileServer(http.FS(assets))))
 	mux.HandleFunc("GET /{$}", s.index)
@@ -45,12 +58,14 @@ func New(logger *slog.Logger) (http.Handler, error) {
 
 type server struct {
 	logger    *slog.Logger
+	projects  ProjectSource
 	templates *template.Template
 	requests  atomic.Uint64
 }
 
 type pageData struct {
-	Year int
+	Year     int
+	Projects []project.Project
 }
 
 type statusData struct {
@@ -63,8 +78,27 @@ type errorData struct {
 	Message string
 }
 
+func isNilProjectSource(source ProjectSource) bool {
+	if source == nil {
+		return true
+	}
+	value := reflect.ValueOf(source)
+	switch value.Kind() {
+	case reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Pointer, reflect.Slice:
+		return value.IsNil()
+	default:
+		return false
+	}
+}
+
 func (s *server) index(w http.ResponseWriter, r *http.Request) {
-	if err := s.render(w, http.StatusOK, "index.html", pageData{Year: time.Now().UTC().Year()}); err != nil {
+	projects, err := s.projects.ListProjects(r.Context())
+	if err != nil {
+		s.respondError(w, r, http.StatusBadGateway, "Projects unavailable", "Facets could not load projects from the configured provider. Try again shortly.", err)
+		return
+	}
+	data := pageData{Year: time.Now().UTC().Year(), Projects: projects}
+	if err := s.render(w, http.StatusOK, "index.html", data); err != nil {
 		s.respondError(w, r, http.StatusInternalServerError, "Dashboard unavailable", "Facets could not render this view. Try again shortly.", err)
 	}
 }

@@ -2,13 +2,17 @@ package web
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"facets.barnlab.dev/internal/project"
 )
 
 func TestDashboardShell(t *testing.T) {
@@ -37,6 +41,64 @@ func TestDashboardShell(t *testing.T) {
 		if !strings.Contains(body, marker) {
 			t.Errorf("GET / body missing %q", marker)
 		}
+	}
+}
+
+func TestNewRejectsNilProjectSource(t *testing.T) {
+	t.Parallel()
+
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	if _, err := New(logger, nil); err == nil {
+		t.Fatal("New() accepted a nil project source")
+	}
+	var source *projectSourceStub
+	if _, err := New(logger, source); err == nil {
+		t.Fatal("New() accepted a typed nil project source")
+	}
+}
+
+func TestDashboardListsProviderProjects(t *testing.T) {
+	t.Parallel()
+
+	projects := []project.Project{
+		{ID: "facets", Name: "Facets", Description: "Personal dashboard"},
+		{ID: "thornwear", Name: "Thornwear", Description: "<script>alert('x')</script>"},
+	}
+	handler := newTestHandlerWithProjects(t, slog.New(slog.NewTextHandler(io.Discard, nil)), projectSourceStub{projects: projects})
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/", nil))
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("GET / status = %d, want %d", response.Code, http.StatusOK)
+	}
+	body := response.Body.String()
+	for _, marker := range []string{"Projects", "2", "Facets", "facets", "Personal dashboard", "Thornwear", "thornwear", "&lt;script&gt;"} {
+		if !strings.Contains(body, marker) {
+			t.Errorf("GET / body missing project marker %q", marker)
+		}
+	}
+	if strings.Contains(body, "<script>alert('x')</script>") || strings.Contains(body, "No projects yet") {
+		t.Fatalf("GET / body rendered unsafe or stale project state: %s", body)
+	}
+}
+
+func TestDashboardSurfacesProjectProviderFailure(t *testing.T) {
+	t.Parallel()
+
+	var logs bytes.Buffer
+	handler := newTestHandlerWithProjects(t, slog.New(slog.NewJSONHandler(&logs, nil)), projectSourceStub{err: errors.New("provider secret")})
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/", nil))
+
+	if response.Code != http.StatusBadGateway {
+		t.Fatalf("GET / status = %d, want %d", response.Code, http.StatusBadGateway)
+	}
+	body := response.Body.String()
+	if !strings.Contains(body, "Projects unavailable") || strings.Contains(body, "provider secret") {
+		t.Fatalf("GET / body = %q", body)
+	}
+	if !strings.Contains(logs.String(), "provider secret") {
+		t.Fatalf("provider failure was not logged: %s", logs.String())
 	}
 }
 
@@ -175,9 +237,23 @@ func TestStylesheetIsEmbedded(t *testing.T) {
 	}
 }
 
+type projectSourceStub struct {
+	projects []project.Project
+	err      error
+}
+
+func (s projectSourceStub) ListProjects(context.Context) ([]project.Project, error) {
+	return s.projects, s.err
+}
+
 func newTestHandler(t *testing.T, logger *slog.Logger) http.Handler {
 	t.Helper()
-	handler, err := New(logger)
+	return newTestHandlerWithProjects(t, logger, projectSourceStub{})
+}
+
+func newTestHandlerWithProjects(t *testing.T, logger *slog.Logger, projects ProjectSource) http.Handler {
+	t.Helper()
+	handler, err := New(logger, projects)
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
 	}

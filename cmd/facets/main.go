@@ -19,7 +19,8 @@ import (
 func main() {
 	logger := slog.New(slog.NewJSONHandler(os.Stderr, nil))
 	registry := project.NewRegistry()
-	if err := registry.Register(kata.New(kata.Config{})); err != nil {
+	provider := kata.New(kata.Config{})
+	if err := registry.Register(provider); err != nil {
 		logger.Error("configure provider", "error", err)
 		os.Exit(1)
 	}
@@ -33,14 +34,14 @@ func main() {
 		Stderr:   os.Stderr,
 		Getenv:   os.Getenv,
 		Serve: func(ctx context.Context, address string) error {
-			return runServer(ctx, address, logger)
+			return runServer(ctx, address, logger, provider)
 		},
 	}
 	os.Exit(app.Run(ctx, os.Args[1:]))
 }
 
-func runServer(ctx context.Context, address string, logger *slog.Logger) error {
-	handler, err := web.New(logger)
+func runServer(ctx context.Context, address string, logger *slog.Logger, projects web.ProjectSource) error {
+	handler, err := web.New(logger, projects)
 	if err != nil {
 		return err
 	}

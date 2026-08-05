@@ -142,11 +142,31 @@
             <header class="section-heading">
               <div>
                 <p class="overline">Project collection</p>
-                <h2 id="project-panel-title">No projects yet</h2>
+                <h2 id="project-panel-title">{{if .Projects}}Projects <span class="project-count">({{len .Projects}})</span>{{else}}No projects yet{{end}}</h2>
               </div>
               <span class="section-marker" aria-hidden="true">01</span>
             </header>
 
+            {{if .Projects}}
+            <ul class="project-list" aria-label="Tracked projects">
+              {{range .Projects}}
+              <li>
+                <article class="project-card">
+                  <header>
+                    <h3>{{.Name}}</h3>
+                    <p class="project-id">
+                      <span class="project-id-label">Project ID</span>
+                      <code>{{.ID}}</code>
+                    </p>
+                  </header>
+                  {{if .Description}}
+                  <p class="project-description">{{.Description}}</p>
+                  {{end}}
+                </article>
+              </li>
+              {{end}}
+            </ul>
+            {{else}}
             <div class="empty-projects">
               <div class="empty-projects-copy">
                 <svg class="empty-symbol" aria-hidden="true" viewBox="0 0 48 48" focusable="false">
@@ -160,6 +180,7 @@
               </div>
               <p class="empty-footnote">Nothing is hidden or still loading. This workspace is ready for its first project.</p>
             </div>
+            {{end}}
           </section>
 
           <aside class="context-panel" aria-labelledby="context-panel-title">
