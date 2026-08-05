@@ -477,24 +477,26 @@ func SyncDuePeriodicals(ctx context.Context, client *Client, source DuePeriodica
 	}
 	result := make([]Task, 0, len(due))
 	for _, item := range due {
-		if strings.TrimSpace(item.ID) == "" || strings.TrimSpace(item.Title) == "" {
+		itemID := strings.TrimSpace(item.ID)
+		title := strings.TrimSpace(item.Title)
+		if itemID == "" || title == "" {
 			return nil, errors.New("tasks: due periodical requires an ID and title")
 		}
-		ref := PeriodicalReference(item.ID)
-		existing, found := byID[item.ID]
+		item.ID, item.Title = itemID, title
+		ref := PeriodicalReference(itemID)
+		existing, found := byID[itemID]
 		if !found {
 			created, err := client.CreateTask(ctx, TaskInput{Title: item.Title, Notes: item.Description, Due: &item.Due, Reference: &ref})
 			if err != nil {
-				return nil, fmt.Errorf("tasks: create periodical %q: %w", item.ID, err)
+				return nil, fmt.Errorf("tasks: create periodical %q: %w", itemID, err)
 			}
 			result = append(result, created)
 			continue
 		}
 		status := StatusOpen
-		title, notes := item.Title, item.Description
-		updated, err := client.UpdateTask(ctx, existing.ID, TaskPatch{Title: &title, Notes: &notes, Due: &item.Due, Status: &status, Reference: &ref})
+		updated, err := client.UpdateTask(ctx, existing.ID, TaskPatch{Title: &item.Title, Notes: &item.Description, Due: &item.Due, Status: &status, Reference: &ref})
 		if err != nil {
-			return nil, fmt.Errorf("tasks: update periodical %q: %w", item.ID, err)
+			return nil, fmt.Errorf("tasks: update periodical %q: %w", itemID, err)
 		}
 		result = append(result, updated)
 	}
