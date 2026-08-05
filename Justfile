@@ -1,0 +1,51 @@
+set shell := ["sh", "-eu", "-c"]
+
+app := "facets"
+
+# List available project commands.
+default:
+    @just --list
+
+# Show the Facets CLI reference.
+help:
+    go run ./cmd/facets help
+
+# Run the Facets CLI with arbitrary arguments.
+run *ARGS:
+    go run ./cmd/facets {{ARGS}}
+
+# Start the web dashboard; override the address with FACETS_ADDR.
+serve:
+    go run ./cmd/facets serve
+
+# Format all Go packages.
+fmt:
+    go fmt ./...
+
+# Fail when Go source files are not formatted.
+fmt-check:
+    @test -z "$(gofmt -l .)"
+
+# Run all tests.
+test:
+    go test ./...
+
+# Run Go's static analyzer.
+vet:
+    go vet ./...
+
+# Build the Facets binary under bin/.
+build:
+    mkdir -p bin
+    go build -trimpath -o bin/{{ app }} ./cmd/facets
+
+# Install the Facets binary into GOBIN or GOPATH/bin.
+install:
+    go install ./cmd/facets
+
+# Run formatting, tests, static analysis, and a build.
+check: fmt-check test vet build
+
+# Remove generated local build artifacts.
+clean:
+    rm -rf bin
