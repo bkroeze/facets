@@ -183,7 +183,7 @@ func workspaceRoot(root string) (string, error) {
 	}
 	for candidate := root; ; candidate = filepath.Dir(candidate) {
 		for _, marker := range []string{".jj", ".git"} {
-			if markerInfo, markerErr := os.Stat(filepath.Join(candidate, marker)); markerErr == nil && markerInfo.IsDir() {
+			if markerInfo, markerErr := os.Stat(filepath.Join(candidate, marker)); markerErr == nil && (markerInfo.IsDir() || marker == ".git") {
 				return candidate, nil
 			}
 		}
@@ -320,16 +320,19 @@ func pathWithinRoot(root, candidate string) bool {
 }
 
 func countCommits(ctx context.Context, root string, since time.Time) (int, error) {
-	const template = `committer.timestamp() ++ "\n"`
-	cmd := exec.CommandContext(ctx, "jj", "log", "--no-graph", "-r", "all()", "-T", template)
+	command := []string{"git", "log", "--all", "--format=%cI"}
+	if markerInfo, err := os.Stat(filepath.Join(root, ".jj")); err == nil && markerInfo.IsDir() {
+		command = []string{"jj", "log", "--no-graph", "-r", "all()", "-T", `committer.timestamp() ++ "\n"`}
+	}
+	cmd := exec.CommandContext(ctx, command[0], command[1:]...)
 	cmd.Dir = root
 	output, err := cmd.Output()
 	if err != nil {
 		var exitErr *exec.ExitError
 		if errors.As(err, &exitErr) {
-			return 0, fmt.Errorf("status: jj log failed: %w: %s", err, strings.TrimSpace(string(exitErr.Stderr)))
+			return 0, fmt.Errorf("status: %s log failed: %w: %s", command[0], err, strings.TrimSpace(string(exitErr.Stderr)))
 		}
-		return 0, fmt.Errorf("status: jj log failed: %w", err)
+		return 0, fmt.Errorf("status: %s log failed: %w", command[0], err)
 	}
 
 	count := 0
@@ -340,7 +343,7 @@ func countCommits(ctx context.Context, root string, since time.Time) (int, error
 		}
 		timestamp, err := parseTimestamp(line)
 		if err != nil {
-			return 0, fmt.Errorf("status: parse jj timestamp %q: %w", line, err)
+			return 0, fmt.Errorf("status: parse %s timestamp %q: %w", command[0], line, err)
 		}
 		if !timestamp.Before(since) {
 			count++

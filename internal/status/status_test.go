@@ -135,6 +135,9 @@ func TestWorkspaceRootFindsRepositoryAncestor(t *testing.T) {
 
 func TestLocalActivitySourceCountsContainedRecentRows(t *testing.T) {
 	root := t.TempDir()
+	if err := os.Mkdir(filepath.Join(root, ".jj"), 0o755); err != nil {
+		t.Fatal(err)
+	}
 	codexHome := t.TempDir()
 	ompHome := t.TempDir()
 	since := time.Date(2026, 8, 1, 0, 0, 0, 0, time.UTC)
@@ -165,6 +168,30 @@ func TestLocalActivitySourceCountsContainedRecentRows(t *testing.T) {
 	}
 	if got.Commits != 1 || got.Sessions["codex"] != 1 || got.Sessions["omp"] != 2 {
 		t.Fatalf("activity = %#v", got)
+	}
+}
+
+func TestLocalActivitySourceCountsGitCommits(t *testing.T) {
+	root := t.TempDir()
+	if err := os.Mkdir(filepath.Join(root, ".git"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("CODEX_HOME", t.TempDir())
+	t.Setenv("OMP_HOME", t.TempDir())
+	gitDir := t.TempDir()
+	gitPath := filepath.Join(gitDir, "git")
+	if err := os.WriteFile(gitPath, []byte("#!/bin/sh\nprintf '%s\\n%s\\n' '2026-08-02T00:00:00Z' '2026-07-31T00:00:00Z'\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", gitDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	since := time.Date(2026, 8, 1, 0, 0, 0, 0, time.UTC)
+	got, err := (localActivitySource{}).Summarize(context.Background(), root, since)
+	if err != nil {
+		t.Fatalf("Summarize() error = %v", err)
+	}
+	if got.Commits != 1 {
+		t.Fatalf("commits = %d, want 1", got.Commits)
 	}
 }
 
