@@ -17,6 +17,7 @@ import (
 
 	"facets.barnlab.dev/internal/project"
 	"facets.barnlab.dev/internal/status"
+	"facets.barnlab.dev/internal/store"
 )
 
 var errProjectNotDiscovered = errors.New("project not discovered")
@@ -25,16 +26,17 @@ var errProjectNotDiscovered = errors.New("project not discovered")
 // for a single-provider embedding; Registry is used when more than one provider
 // is available.
 type App struct {
-	Registry   *project.Registry
-	Provider   project.Provider
-	Summary    *status.Builder
-	Stdout     io.Writer
-	Stderr     io.Writer
-	Cwd        string
-	Env        map[string]string
-	Getenv     func(string) string
-	Executable string
-	Serve      func(context.Context, string) error
+	Registry     *project.Registry
+	Provider     project.Provider
+	Summary      *status.Builder
+	ProjectStore *store.Store
+	Stdout       io.Writer
+	Stderr       io.Writer
+	Cwd          string
+	Env          map[string]string
+	Getenv       func(string) string
+	Executable   string
+	Serve        func(context.Context, string) error
 }
 
 type runConfig struct {
@@ -505,6 +507,11 @@ func (a *App) runProjects(ctx context.Context, stdout, stderr io.Writer, cfg run
 		if err != nil {
 			return a.providerError(stdout, stderr, cfg.format, "could not list projects", err, fmt.Sprintf("Check provider configuration and retry `%s projects list`", selectedFacetsCommand(cfg)))
 		}
+		if a.ProjectStore != nil {
+			if err := a.ProjectStore.SyncProjects(ctx, provider.Name(), items); err != nil {
+				return a.providerError(stdout, stderr, cfg.format, "could not save project registry", err, fmt.Sprintf("Check the local database and retry `%s projects list`", selectedFacetsCommand(cfg)))
+			}
+		}
 		rows := make([][]any, len(items))
 		for i, item := range items {
 			rows[i] = []any{item.ID, item.Name}
@@ -516,6 +523,43 @@ func (a *App) runProjects(ctx context.Context, stdout, stderr io.Writer, cfg run
 		projectCommand := selectedFacetsCommand(cfg) + " projects"
 		doc = append(doc, field{name: "help", value: primitiveArray{fmt.Sprintf("Run `%s show <id>` to view project details", projectCommand)}})
 		a.write(stdout, cfg.format, doc)
+		return 0
+	case "set":
+		if (len(args) == 2 && isHelp(args[1])) || (len(args) == 3 && isHelp(args[2])) {
+			a.write(stdout, cfg.format, projectSetHelp())
+			return 0
+		}
+		if len(args) != 3 || strings.TrimSpace(args[1]) == "" || strings.HasPrefix(args[1], "-") {
+			a.usageError(stdout, cfg.format, "project ID and key=value are required", "Run `facets projects set <id> directory=<path>`")
+			return 2
+		}
+		key, value, ok := strings.Cut(args[2], "=")
+		key, value = strings.TrimSpace(key), strings.TrimSpace(value)
+		if !ok || key == "" || value == "" {
+			a.usageError(stdout, cfg.format, "project setting must be key=value", "Run `facets projects set <id> directory=<path>`")
+			return 2
+		}
+		if key != "directory" {
+			a.usageError(stdout, cfg.format, fmt.Sprintf("unknown project setting %q", key), "The supported setting is `directory=<path>`")
+			return 2
+		}
+		if a.ProjectStore == nil {
+			return a.providerError(stdout, stderr, cfg.format, "project registry is unavailable", errors.New("local project registry is not configured"), "Configure the local Facets database and retry")
+		}
+		provider, code := a.selectProvider(stdout, cfg)
+		if code != 0 {
+			return code
+		}
+		directory, err := a.resolveDirectory(value)
+		if err != nil {
+			a.usageError(stdout, cfg.format, fmt.Sprintf("could not resolve project directory: %v", err), "Use an existing absolute or relative directory path")
+			return 2
+		}
+		registered, err := a.ProjectStore.SetProjectMetadata(ctx, provider.Name(), args[1], key, directory)
+		if err != nil {
+			return a.providerError(stdout, stderr, cfg.format, fmt.Sprintf("could not set project %q metadata", args[1]), err, fmt.Sprintf("Run `%s projects list` first, then retry", selectedFacetsCommand(cfg)))
+		}
+		a.write(stdout, cfg.format, registeredProjectDocument(registered))
 		return 0
 	case "show":
 		usageCommand := a.projectUsageCommand(cfg) + " show"
@@ -540,20 +584,116 @@ func (a *App) runProjects(ctx context.Context, stdout, stderr io.Writer, cfg run
 			builder = status.NewBuilder()
 		}
 		root := a.Cwd
-		if strings.TrimSpace(root) == "" {
+		if a.ProjectStore != nil {
+			root, err = a.projectDirectory(ctx, provider.Name(), args[1], root)
+			if err != nil {
+				return a.providerError(stdout, stderr, cfg.format, fmt.Sprintf("could not load project %q metadata", args[1]), err, fmt.Sprintf("Retry `%s projects show %s`", selectedFacetsCommand(cfg), shellQuote(args[1])))
+			}
+		} else if strings.TrimSpace(root) == "" {
 			root = "."
 		}
 		summary, err := builder.Build(ctx, provider, root, args[1])
 		if err != nil {
 			return a.providerError(stdout, stderr, cfg.format, fmt.Sprintf("could not summarize project %q", args[1]), err, fmt.Sprintf("Retry `%s projects show %s`", selectedFacetsCommand(cfg), shellQuote(args[1])))
 		}
-		doc := projectDocument(item)
+		var registered *store.RegisteredProject
+		if a.ProjectStore != nil {
+			record, lookupErr := a.ProjectStore.RegisteredProject(ctx, provider.Name(), args[1])
+			if lookupErr != nil && !errors.Is(lookupErr, store.ErrNotFound) {
+				return a.providerError(stdout, stderr, cfg.format, fmt.Sprintf("could not load project %q metadata", args[1]), lookupErr, fmt.Sprintf("Retry `%s projects show %s`", selectedFacetsCommand(cfg), shellQuote(args[1])))
+			}
+			if lookupErr == nil {
+				registered = &record
+			}
+		}
+		doc := projectDocument(item, registered)
 		doc = append(doc, field{name: "status", value: statusDocument(summary)})
 		a.write(stdout, cfg.format, doc)
 		return 0
 	default:
 		a.usageError(stdout, cfg.format, fmt.Sprintf("unknown projects command %q", args[0]), "Run `facets projects --help`")
 		return 2
+	}
+}
+
+func (a *App) resolveDirectory(value string) (string, error) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return "", errors.New("directory must not be empty")
+	}
+	base := strings.TrimSpace(a.Cwd)
+	if base == "" {
+		var err error
+		base, err = os.Getwd()
+		if err != nil {
+			return "", fmt.Errorf("resolve current directory: %w", err)
+		}
+	}
+	base, err := filepath.Abs(base)
+	if err != nil {
+		return "", fmt.Errorf("resolve current directory: %w", err)
+	}
+	if !filepath.IsAbs(value) {
+		value = filepath.Join(base, value)
+	}
+	value, err = filepath.Abs(value)
+	if err != nil {
+		return "", fmt.Errorf("resolve directory: %w", err)
+	}
+	info, err := os.Stat(value)
+	if err != nil {
+		return "", fmt.Errorf("stat directory: %w", err)
+	}
+	if !info.IsDir() {
+		return "", fmt.Errorf("path is not a directory: %s", value)
+	}
+	return filepath.Clean(value), nil
+}
+
+func (a *App) projectDirectory(ctx context.Context, source, id, fallback string) (string, error) {
+	registered, err := a.ProjectStore.RegisteredProject(ctx, source, id)
+	if errors.Is(err, store.ErrNotFound) {
+		return "", nil
+	}
+	if err != nil {
+		return "", err
+	}
+	directory, ok := registered.Metadata["directory"].(string)
+	if !ok || strings.TrimSpace(directory) == "" {
+		return "", nil
+	}
+	directory = strings.TrimSpace(directory)
+	if filepath.IsAbs(directory) {
+		return filepath.Clean(directory), nil
+	}
+	base := strings.TrimSpace(fallback)
+	if base == "" {
+		base, err = os.Getwd()
+		if err != nil {
+			return "", fmt.Errorf("resolve current directory: %w", err)
+		}
+	}
+	base, err = filepath.Abs(base)
+	if err != nil {
+		return "", fmt.Errorf("resolve current directory: %w", err)
+	}
+	return filepath.Clean(filepath.Join(base, directory)), nil
+}
+
+func registeredProjectDocument(registered store.RegisteredProject) object {
+	metadata := object{}
+	if directory, ok := registered.Metadata["directory"].(string); ok {
+		metadata = append(metadata, field{name: "directory", value: directory})
+	}
+	return object{
+		{name: "project", value: object{
+			{name: "id", value: registered.ID},
+			{name: "name", value: registered.Name},
+			{name: "source", value: registered.Source},
+			{name: "first_seen", value: formatTime(registered.FirstSeen)},
+			{name: "last_seen", value: formatTime(registered.LastSeen)},
+			{name: "metadata", value: metadata},
+		}},
 	}
 }
 
@@ -829,8 +969,36 @@ func taskDocument(task project.Task, full bool, taskCommand string) object {
 	return doc
 }
 
-func projectDocument(item project.Project) object {
-	return object{{name: "project", value: object{{name: "id", value: item.ID}, {name: "name", value: item.Name}, {name: "description", value: item.Description}, {name: "created", value: formatTime(item.CreatedAt)}, {name: "updated", value: formatTime(item.UpdatedAt)}}}}
+func projectDocument(item project.Project, registered *store.RegisteredProject) object {
+	projectFields := object{
+		{name: "id", value: item.ID},
+		{name: "name", value: item.Name},
+		{name: "description", value: item.Description},
+		{name: "created", value: formatTime(item.CreatedAt)},
+		{name: "updated", value: formatTime(item.UpdatedAt)},
+	}
+	if registered != nil {
+		projectFields = append(projectFields,
+			field{name: "source", value: registered.Source},
+			field{name: "first_seen", value: formatTime(registered.FirstSeen)},
+			field{name: "last_seen", value: formatTime(registered.LastSeen)},
+			field{name: "metadata", value: metadataDocument(registered.Metadata)},
+		)
+	}
+	return object{{name: "project", value: projectFields}}
+}
+
+func metadataDocument(metadata map[string]any) object {
+	keys := make([]string, 0, len(metadata))
+	for key := range metadata {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	result := make(object, 0, len(keys))
+	for _, key := range keys {
+		result = append(result, field{name: key, value: metadata[key]})
+	}
+	return result
 }
 
 func statusDocument(summary status.Summary) object {
@@ -848,7 +1016,7 @@ func statusDocument(summary status.Summary) object {
 			{name: "commits", value: summary.Activity.Commits},
 			{name: "sessions", value: object{
 				{name: "codex", value: summary.Activity.Sessions["codex"]},
-				{name: "omp", value: summary.Activity.Sessions["omp"]},
+				{name: "omp", value: sessionCount(summary.Activity.Sessions["omp"])},
 			}},
 		}},
 	}
@@ -868,6 +1036,12 @@ func priorityCounts(counts map[int]int) object {
 		countsObject = append(countsObject, field{name: strconv.Itoa(priority), value: counts[priority]})
 	}
 	return countsObject
+}
+func sessionCount(value int) any {
+	if value == status.UnknownSessionCount {
+		return "??"
+	}
+	return value
 }
 func priorityValue(value *int) any {
 	if value == nil {

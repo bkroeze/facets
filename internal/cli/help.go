@@ -83,12 +83,17 @@ func taskDeleteHelp() object {
 }
 
 func projectsHelp() object {
-	return helpDocument("facets projects <list|show>", "List projects or show one project",
-		table{columns: []string{"command", "required", "description"}, rows: [][]any{{"list", "", "list projects"}, {"show", "<id>", "show project details"}}},
-		primitiveArray{"facets projects list", "facets projects show thornwear"}, nil)
+	return helpDocument("facets projects <list|show|set>", "List projects, show one project, or set local project metadata",
+		table{columns: []string{"command", "required", "description"}, rows: [][]any{{"list", "", "list projects"}, {"show", "<id>", "show one project"}, {"set", "<id> key=value", "set local project metadata"}}},
+		primitiveArray{"facets projects list", "facets projects show thornwear", "facets projects set thornwear directory=/home/user/Projects/thornwear"}, nil)
 }
 func projectsListHelp() object {
 	return helpDocument("facets projects list", "List projects available from the selected provider", table{columns: []string{"name", "default", "description"}}, primitiveArray{"facets projects list", "facets --json projects list"}, nil)
+}
+func projectSetHelp() object {
+	return helpDocument("facets projects set <id> directory=<path>", "Set local metadata for a discovered project",
+		table{columns: []string{"name", "default", "description"}, rows: [][]any{{"<id>", "required", "provider project ID"}, {"directory=<path>", "required", "working directory used to scope activity"}}},
+		primitiveArray{"facets projects set thornwear directory=/home/user/Projects/thornwear"}, nil)
 }
 func projectShowHelp() object {
 	return helpDocument("facets projects show <id>", "Show one project with a 30-day task and activity summary",

@@ -127,10 +127,27 @@ facets tasks close --help
 ```sh
 facets projects list
 facets projects show facets
+facets projects set facets directory=/home/user/Projects/facets
 facets --json projects list
 ```
 
-The current CLI exposes project listing and inspection. Task mutations are delegated to the selected provider; Kata task deletion remains recoverable according to Kata's archive semantics.
+`projects list` pulls projects from the selected provider and records them in
+the local registry. The registry stores provider source, first-seen and
+last-seen timestamps, provider metadata, and local settings. Set `directory`
+for each project so activity summaries can scope OMP sessions:
+
+```sh
+facets projects set thornwear directory=/home/user/Projects/thornwear
+```
+
+The registry uses `~/.local/share/facets/facets.db` by default. Set `FACETS_DB`
+to use another SQLite database. Projects without a configured directory show
+`??` for their OMP session total rather than attributing activity to the
+wrong project.
+
+The current CLI exposes project listing, inspection, and local metadata
+configuration. Task mutations are delegated to the selected provider; Kata
+task deletion remains recoverable according to Kata's archive semantics.
 
 ## Web dashboard shell
 

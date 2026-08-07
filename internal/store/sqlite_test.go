@@ -10,6 +10,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"facets.barnlab.dev/internal/project"
 )
 
 func TestProjectLifecyclePersists(t *testing.T) {
@@ -201,7 +203,7 @@ func TestOpenRejectsNewerSchema(t *testing.T) {
 	if err := db.QueryRowContext(ctx, "PRAGMA journal_mode = DELETE").Scan(&journalMode); err != nil {
 		t.Fatalf("set journal_mode error = %v", err)
 	}
-	if _, err := db.ExecContext(ctx, "PRAGMA user_version = 2"); err != nil {
+	if _, err := db.ExecContext(ctx, "PRAGMA user_version = 3"); err != nil {
 		t.Fatalf("set user_version error = %v", err)
 	}
 	if err := db.Close(); err != nil {
@@ -245,6 +247,48 @@ func TestOpenRejectsNegativeSchemaVersion(t *testing.T) {
 	_, err = Open(ctx, path)
 	if err == nil || !strings.Contains(err.Error(), "invalid database schema version -1") {
 		t.Fatalf("Open() error = %v, want invalid-schema error", err)
+	}
+}
+
+func TestProjectRegistrySyncPreservesLocalMetadata(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	store := openTestStore(t, ctx, filepath.Join(t.TempDir(), "nested", "facets.db"))
+	items := []project.Project{{
+		ID:       "demo",
+		Name:     "Demo",
+		Metadata: map[string]any{"remote": "v1"},
+	}}
+	if err := store.SyncProjects(ctx, "kata", items); err != nil {
+		t.Fatalf("SyncProjects(first) error = %v", err)
+	}
+	first, err := store.RegisteredProject(ctx, "kata", "demo")
+	if err != nil {
+		t.Fatalf("RegisteredProject(first) error = %v", err)
+	}
+	if first.FirstSeen.IsZero() || first.LastSeen.IsZero() || first.Metadata["remote"] != "v1" {
+		t.Fatalf("first registry record = %#v", first)
+	}
+	updated, err := store.SetProjectMetadata(ctx, "kata", "demo", "directory", "/tmp/demo")
+	if err != nil {
+		t.Fatalf("SetProjectMetadata() error = %v", err)
+	}
+	if updated.Metadata["directory"] != "/tmp/demo" {
+		t.Fatalf("updated metadata = %#v", updated.Metadata)
+	}
+	if err := store.SyncProjects(ctx, "kata", []project.Project{{ID: "demo", Name: "Renamed", Metadata: map[string]any{"remote": "v2"}}}); err != nil {
+		t.Fatalf("SyncProjects(second) error = %v", err)
+	}
+	final, err := store.RegisteredProject(ctx, "kata", "demo")
+	if err != nil {
+		t.Fatalf("RegisteredProject(final) error = %v", err)
+	}
+	if final.Name != "Renamed" || final.FirstSeen != first.FirstSeen || final.Metadata["remote"] != "v2" || final.Metadata["directory"] != "/tmp/demo" {
+		t.Fatalf("final registry record = %#v", final)
+	}
+	if final.LastSeen.Before(first.LastSeen) {
+		t.Fatalf("last seen moved backwards: first=%v final=%v", first.LastSeen, final.LastSeen)
 	}
 }
 

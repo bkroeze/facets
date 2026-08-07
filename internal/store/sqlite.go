@@ -3,15 +3,19 @@ package store
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
+	"facets.barnlab.dev/internal/project"
 	_ "modernc.org/sqlite"
 )
 
-const schemaVersion = 1
+const schemaVersion = 2
 
 var ErrNotFound = errors.New("store: not found")
 
@@ -29,16 +33,41 @@ type Project struct {
 	UpdatedAt time.Time
 }
 
+// RegisteredProject is a provider project tracked by the local registry.
+type RegisteredProject struct {
+	Source    string
+	ID        string
+	Name      string
+	Metadata  map[string]any
+	FirstSeen time.Time
+	LastSeen  time.Time
+}
+
 // ProjectInput contains the mutable fields of a project.
 type ProjectInput struct {
 	Name string
 	Slug string
 }
 
+// DefaultPath returns the default local registry database path.
+func DefaultPath() (string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", fmt.Errorf("store: resolve home directory: %w", err)
+	}
+	return filepath.Join(home, ".local", "share", "facets", "facets.db"), nil
+}
+
 // Open opens a SQLite database and applies all available schema migrations.
 func Open(ctx context.Context, path string) (*Store, error) {
-	if strings.TrimSpace(path) == "" {
+	path = strings.TrimSpace(path)
+	if path == "" {
 		return nil, errors.New("store: database path is required")
+	}
+	if parent := filepath.Dir(path); parent != "." && parent != "" {
+		if err := os.MkdirAll(parent, 0o755); err != nil {
+			return nil, fmt.Errorf("store: create database directory: %w", err)
+		}
 	}
 
 	db, err := sql.Open("sqlite", connectionDSN(path))
@@ -108,6 +137,23 @@ func migrate(ctx context.Context, db *sql.DB) error {
 			PRAGMA user_version = 1;
 		`); err != nil {
 			return fmt.Errorf("store: migrate schema to version 1: %w", err)
+		}
+		version = 1
+	}
+	if version < 2 {
+		if _, err := tx.ExecContext(ctx, `
+			CREATE TABLE project_registry (
+				source TEXT NOT NULL CHECK (length(trim(source)) > 0),
+				project_id TEXT NOT NULL CHECK (length(trim(project_id)) > 0),
+				name TEXT NOT NULL CHECK (length(trim(name)) > 0),
+				metadata TEXT NOT NULL DEFAULT '{}',
+				first_seen INTEGER NOT NULL,
+				last_seen INTEGER NOT NULL,
+				PRIMARY KEY (source, project_id)
+			) STRICT;
+			PRAGMA user_version = 2;
+		`); err != nil {
+			return fmt.Errorf("store: migrate schema to version 2: %w", err)
 		}
 	}
 
@@ -216,6 +262,144 @@ func (s *Store) DeleteProject(ctx context.Context, id int64) error {
 	return requireChangedRow(result)
 }
 
+// SyncProjects records the latest provider project list while preserving
+// locally configured directory metadata and first-seen timestamps.
+func (s *Store) SyncProjects(ctx context.Context, source string, items []project.Project) error {
+	source = strings.TrimSpace(source)
+	if source == "" {
+		return errors.New("store: project source is required")
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("store: begin project sync: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	now := time.Now().UTC().UnixMilli()
+	for _, item := range items {
+		id := strings.TrimSpace(item.ID)
+		name := strings.TrimSpace(item.Name)
+		if id == "" {
+			return errors.New("store: project ID is required")
+		}
+		if name == "" {
+			return fmt.Errorf("store: project %q name is required", id)
+		}
+		metadata, err := providerMetadata(tx, source, id, item.Metadata)
+		if err != nil {
+			return err
+		}
+		encoded, err := json.Marshal(metadata)
+		if err != nil {
+			return fmt.Errorf("store: encode metadata for project %q: %w", id, err)
+		}
+		if _, err := tx.ExecContext(ctx, `
+			INSERT INTO project_registry (source, project_id, name, metadata, first_seen, last_seen)
+			VALUES (?, ?, ?, ?, ?, ?)
+			ON CONFLICT(source, project_id) DO UPDATE SET
+				name = excluded.name,
+				metadata = excluded.metadata,
+				last_seen = excluded.last_seen
+		`, source, id, name, string(encoded), now, now); err != nil {
+			return fmt.Errorf("store: sync project %q: %w", id, err)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("store: commit project sync: %w", err)
+	}
+	return nil
+}
+
+// RegisteredProject returns a provider project from the local registry.
+func (s *Store) RegisteredProject(ctx context.Context, source, id string) (RegisteredProject, error) {
+	source = strings.TrimSpace(source)
+	id = strings.TrimSpace(id)
+	if source == "" {
+		return RegisteredProject{}, errors.New("store: project source is required")
+	}
+	if id == "" {
+		return RegisteredProject{}, errors.New("store: project ID is required")
+	}
+	return scanRegisteredProject(s.db.QueryRowContext(ctx, `
+		SELECT source, project_id, name, metadata, first_seen, last_seen
+		FROM project_registry
+		WHERE source = ? AND project_id = ?
+	`, source, id))
+}
+
+// SetProjectMetadata sets one local metadata key on a registered project.
+func (s *Store) SetProjectMetadata(ctx context.Context, source, id, key, value string) (RegisteredProject, error) {
+	source = strings.TrimSpace(source)
+	id = strings.TrimSpace(id)
+	key = strings.TrimSpace(key)
+	if source == "" {
+		return RegisteredProject{}, errors.New("store: project source is required")
+	}
+	if id == "" {
+		return RegisteredProject{}, errors.New("store: project ID is required")
+	}
+	if key == "" {
+		return RegisteredProject{}, errors.New("store: project metadata key is required")
+	}
+	current, err := s.RegisteredProject(ctx, source, id)
+	if err != nil {
+		return RegisteredProject{}, err
+	}
+	if current.Metadata == nil {
+		current.Metadata = make(map[string]any)
+	}
+	current.Metadata[key] = value
+	encoded, err := json.Marshal(current.Metadata)
+	if err != nil {
+		return RegisteredProject{}, fmt.Errorf("store: encode project metadata: %w", err)
+	}
+	if _, err := s.db.ExecContext(ctx, `
+		UPDATE project_registry
+		SET metadata = ?
+		WHERE source = ? AND project_id = ?
+	`, string(encoded), source, id); err != nil {
+		return RegisteredProject{}, fmt.Errorf("store: set project metadata: %w", err)
+	}
+	current.Metadata = cloneMetadata(current.Metadata)
+	return current, nil
+}
+func providerMetadata(tx *sql.Tx, source, id string, incoming map[string]any) (map[string]any, error) {
+	metadata := cloneMetadata(incoming)
+	var existing string
+	err := tx.QueryRow(`
+		SELECT metadata
+		FROM project_registry
+		WHERE source = ? AND project_id = ?
+	`, source, id).Scan(&existing)
+	if errors.Is(err, sql.ErrNoRows) {
+		return metadata, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("store: read metadata for project %q: %w", id, err)
+	}
+	var current map[string]any
+	if existing != "" {
+		if err := json.Unmarshal([]byte(existing), &current); err != nil {
+			return nil, fmt.Errorf("store: decode metadata for project %q: %w", id, err)
+		}
+	}
+	if directory, ok := current["directory"]; ok {
+		metadata["directory"] = directory
+	}
+	return metadata, nil
+}
+
+func cloneMetadata(source map[string]any) map[string]any {
+	if len(source) == 0 {
+		return make(map[string]any)
+	}
+	target := make(map[string]any, len(source))
+	for key, value := range source {
+		target[key] = value
+	}
+	return target
+}
+
 func cleanProjectInput(input ProjectInput) (ProjectInput, error) {
 	input.Name = strings.TrimSpace(input.Name)
 	input.Slug = strings.TrimSpace(input.Slug)
@@ -226,6 +410,30 @@ func cleanProjectInput(input ProjectInput) (ProjectInput, error) {
 		return ProjectInput{}, errors.New("store: project slug is required")
 	}
 	return input, nil
+}
+func scanRegisteredProject(row rowScanner) (RegisteredProject, error) {
+	var (
+		registered          RegisteredProject
+		metadata            string
+		firstSeen, lastSeen int64
+	)
+	if err := row.Scan(&registered.Source, &registered.ID, &registered.Name, &metadata, &firstSeen, &lastSeen); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return RegisteredProject{}, ErrNotFound
+		}
+		return RegisteredProject{}, fmt.Errorf("store: read registered project: %w", err)
+	}
+	if metadata != "" {
+		if err := json.Unmarshal([]byte(metadata), &registered.Metadata); err != nil {
+			return RegisteredProject{}, fmt.Errorf("store: decode registered project metadata: %w", err)
+		}
+	}
+	if registered.Metadata == nil {
+		registered.Metadata = make(map[string]any)
+	}
+	registered.FirstSeen = time.UnixMilli(firstSeen).UTC()
+	registered.LastSeen = time.UnixMilli(lastSeen).UTC()
+	return registered, nil
 }
 
 func requireChangedRow(result sql.Result) error {

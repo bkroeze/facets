@@ -165,8 +165,8 @@
                     <dl class="project-summary-metrics">
                       <div><dt>Open</dt><dd>{{.Summary.Tasks.Open}}</dd></div>
                       <div><dt>Closed</dt><dd>{{.Summary.Tasks.Closed}}</dd></div>
-                      <div><dt>Codex sessions</dt><dd>{{index .Summary.Activity.Sessions "codex"}}</dd></div>
-                      <div><dt>OMP sessions</dt><dd>{{index .Summary.Activity.Sessions "omp"}}</dd></div>
+                      <div><dt>Codex sessions</dt><dd>{{sessionCount (index .Summary.Activity.Sessions "codex")}}</dd></div>
+                      <div><dt>OMP sessions</dt><dd>{{sessionCount (index .Summary.Activity.Sessions "omp")}}</dd></div>
                     </dl>
                     <div class="project-priorities">
                       <p>Open by priority</p>

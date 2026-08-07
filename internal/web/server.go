@@ -19,6 +19,7 @@ import (
 
 	"facets.barnlab.dev/internal/project"
 	"facets.barnlab.dev/internal/status"
+	"facets.barnlab.dev/internal/store"
 )
 
 //go:embed templates/*.html assets/*
@@ -31,6 +32,15 @@ type ProjectSource interface {
 
 // New returns the Facets HTTP handler.
 func New(logger *slog.Logger, projects ProjectSource, providers ...project.Provider) (http.Handler, error) {
+	return newWithRegistry(logger, projects, nil, providers...)
+}
+
+// NewWithRegistry returns a Facets HTTP handler backed by a local project registry.
+func NewWithRegistry(logger *slog.Logger, projects ProjectSource, registry *store.Store, providers ...project.Provider) (http.Handler, error) {
+	return newWithRegistry(logger, projects, registry, providers...)
+}
+
+func newWithRegistry(logger *slog.Logger, projects ProjectSource, registry *store.Store, providers ...project.Provider) (http.Handler, error) {
 	if logger == nil {
 		logger = slog.Default()
 	}
@@ -47,7 +57,14 @@ func New(logger *slog.Logger, projects ProjectSource, providers ...project.Provi
 		}
 		provider = providers[0]
 	}
-	templates, err := template.ParseFS(content, "templates/*.html")
+	templates, err := template.New("facets").Funcs(template.FuncMap{
+		"sessionCount": func(value int) string {
+			if value == status.UnknownSessionCount {
+				return "??"
+			}
+			return strconv.Itoa(value)
+		},
+	}).ParseFS(content, "templates/*.html")
 	if err != nil {
 		return nil, fmt.Errorf("web: parse templates: %w", err)
 	}
@@ -57,7 +74,7 @@ func New(logger *slog.Logger, projects ProjectSource, providers ...project.Provi
 	}
 
 	s := &server{
-		logger: logger, projects: projects, provider: provider,
+		logger: logger, projects: projects, provider: provider, registry: registry,
 		summarizer: status.NewBuilder(), templates: templates,
 	}
 	mux := http.NewServeMux()
@@ -73,11 +90,11 @@ type server struct {
 	logger     *slog.Logger
 	projects   ProjectSource
 	provider   project.Provider
+	registry   *store.Store
 	summarizer *status.Builder
 	templates  *template.Template
 	requests   atomic.Uint64
 }
-
 type projectView struct {
 	project.Project
 	Summary *status.Summary
@@ -117,11 +134,25 @@ func (s *server) index(w http.ResponseWriter, r *http.Request) {
 		s.respondError(w, r, http.StatusBadGateway, "Projects unavailable", "Facets could not load projects from the configured provider. Try again shortly.", err)
 		return
 	}
+	if s.registry != nil && s.provider != nil {
+		if err := s.registry.SyncProjects(r.Context(), s.provider.Name(), projects); err != nil {
+			s.respondError(w, r, http.StatusBadGateway, "Project registry unavailable", "Facets could not update the local project registry. Try again shortly.", err)
+			return
+		}
+	}
 	views := make([]projectView, len(projects))
 	for i, item := range projects {
 		views[i] = projectView{Project: item}
 		if s.provider != nil {
-			summary, err := s.summarizer.Build(r.Context(), s.provider, ".", item.ID)
+			root := "."
+			if s.registry != nil {
+				root, err = s.projectDirectory(r.Context(), s.provider.Name(), item.ID)
+				if err != nil {
+					s.respondError(w, r, http.StatusBadGateway, "Project metadata unavailable", "Facets could not load project metadata. Try again shortly.", err)
+					return
+				}
+			}
+			summary, err := s.summarizer.Build(r.Context(), s.provider, root, item.ID)
 			if err != nil {
 				s.respondError(w, r, http.StatusBadGateway, "Project status unavailable", "Facets could not summarize project activity. Try again shortly.", err)
 				return
@@ -129,10 +160,26 @@ func (s *server) index(w http.ResponseWriter, r *http.Request) {
 			views[i].Summary = &summary
 		}
 	}
+
 	data := pageData{Year: time.Now().UTC().Year(), Projects: views}
 	if err := s.render(w, http.StatusOK, "index.html", data); err != nil {
 		s.respondError(w, r, http.StatusInternalServerError, "Dashboard unavailable", "Facets could not render this view. Try again shortly.", err)
 	}
+}
+
+func (s *server) projectDirectory(ctx context.Context, source, id string) (string, error) {
+	registered, err := s.registry.RegisteredProject(ctx, source, id)
+	if errors.Is(err, store.ErrNotFound) {
+		return "", nil
+	}
+	if err != nil {
+		return "", err
+	}
+	directory, ok := registered.Metadata["directory"].(string)
+	if !ok || strings.TrimSpace(directory) == "" {
+		return "", nil
+	}
+	return strings.TrimSpace(directory), nil
 }
 
 func (s *server) status(w http.ResponseWriter, r *http.Request) {

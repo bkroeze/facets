@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -132,6 +133,15 @@ func TestWorkspaceRootFindsRepositoryAncestor(t *testing.T) {
 		t.Fatalf("workspaceRoot() = %q, want %q", got, root)
 	}
 }
+func TestLocalActivitySourceMarksUnknownOMPWithoutRoot(t *testing.T) {
+	activity, err := (localActivitySource{}).Summarize(context.Background(), "", time.Now())
+	if err != nil {
+		t.Fatalf("Summarize() error = %v", err)
+	}
+	if activity.Sessions["omp"] != UnknownSessionCount {
+		t.Fatalf("OMP sessions = %d, want %d", activity.Sessions["omp"], UnknownSessionCount)
+	}
+}
 
 func TestLocalActivitySourceCountsContainedRecentRows(t *testing.T) {
 	root := t.TempDir()
@@ -205,13 +215,25 @@ func createActivityDB(t *testing.T, path, table string, rows []activityRow) {
 	}
 	defer db.Close()
 	timestampColumn := "created_at"
+	createSQL := "CREATE TABLE " + table + " (cwd TEXT, " + timestampColumn + " TEXT"
 	if table == "threads" {
 		timestampColumn = "created_at_ms"
+		createSQL = "CREATE TABLE " + table + " (cwd TEXT, " + timestampColumn + " TEXT"
 	}
-	if _, err := db.Exec("CREATE TABLE " + table + " (cwd TEXT, " + timestampColumn + " TEXT)"); err != nil {
+	if table == "history" {
+		createSQL += ", session_id TEXT"
+	}
+	createSQL += ")"
+	if _, err := db.Exec(createSQL); err != nil {
 		t.Fatal(err)
 	}
-	for _, row := range rows {
+	for i, row := range rows {
+		if table == "history" {
+			if _, err := db.Exec("INSERT INTO "+table+" (cwd, "+timestampColumn+", session_id) VALUES (?, ?, ?)", row.cwd, row.createdAt, fmt.Sprintf("session-%d", i)); err != nil {
+				t.Fatal(err)
+			}
+			continue
+		}
 		if _, err := db.Exec("INSERT INTO "+table+" (cwd, "+timestampColumn+") VALUES (?, ?)", row.cwd, row.createdAt); err != nil {
 			t.Fatal(err)
 		}

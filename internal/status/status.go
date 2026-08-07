@@ -25,6 +25,9 @@ const (
 	defaultPeriod   = 30
 )
 
+// UnknownSessionCount marks a session total that cannot be scoped to a project.
+const UnknownSessionCount = -1
+
 // TaskSummary contains task totals and priority buckets.
 type TaskSummary struct {
 	Total            int
@@ -83,9 +86,13 @@ func (b *Builder) Build(ctx context.Context, provider project.Provider, root, pr
 	if isNil(b.Activity) {
 		return Summary{}, errors.New("status: activity source is required")
 	}
-	root, err := workspaceRoot(root)
-	if err != nil {
-		return Summary{}, err
+	root = strings.TrimSpace(root)
+	if root != "" {
+		resolved, err := workspaceRoot(root)
+		if err != nil {
+			return Summary{}, err
+		}
+		root = resolved
 	}
 	projectID = strings.TrimSpace(projectID)
 	if projectID == "" {
@@ -200,6 +207,9 @@ func (localActivitySource) Summarize(ctx context.Context, root string, since tim
 	if ctx == nil {
 		return Activity{}, errors.New("status: context is required")
 	}
+	if strings.TrimSpace(root) == "" {
+		return Activity{Sessions: map[string]int{ompSessionKey: UnknownSessionCount}}, nil
+	}
 	root, err := workspaceRoot(root)
 	if err != nil {
 		return Activity{}, err
@@ -215,14 +225,14 @@ func (localActivitySource) Summarize(ctx context.Context, root string, since tim
 			ompHome = filepath.Join(home, ".omp")
 		}
 	}
-	codex, err := countSessionDatabase(ctx, codexHome, "state_5.sqlite", "threads", "created_at_ms", root, since)
+	codex, err := countSessionDatabase(ctx, codexHome, "state_5.sqlite", "threads", "created_at_ms", "", root, since)
 	if err != nil {
 		return Activity{}, fmt.Errorf("status: count Codex sessions: %w", err)
 	}
 	omp, err := countSessionDatabaseCandidates(ctx, ompHome, []string{
 		filepath.Join("agent", "history.db"),
 		filepath.Join("agent", "history"),
-	}, "history", "created_at", root, since)
+	}, "history", "created_at", "session_id", root, since)
 	if err != nil {
 		return Activity{}, fmt.Errorf("status: count OMP sessions: %w", err)
 	}
@@ -236,7 +246,7 @@ func (localActivitySource) Summarize(ctx context.Context, root string, since tim
 	}}, nil
 }
 
-func countSessionDatabaseCandidates(ctx context.Context, home string, databaseNames []string, table, timestampColumn, root string, since time.Time) (int, error) {
+func countSessionDatabaseCandidates(ctx context.Context, home string, databaseNames []string, table, timestampColumn, sessionColumn, root string, since time.Time) (int, error) {
 	for _, databaseName := range databaseNames {
 		path := filepath.Join(strings.TrimSpace(home), databaseName)
 		if _, err := os.Stat(path); err != nil {
@@ -245,12 +255,12 @@ func countSessionDatabaseCandidates(ctx context.Context, home string, databaseNa
 			}
 			return 0, fmt.Errorf("stat %s: %w", path, err)
 		}
-		return countSessionDatabase(ctx, home, databaseName, table, timestampColumn, root, since)
+		return countSessionDatabase(ctx, home, databaseName, table, timestampColumn, sessionColumn, root, since)
 	}
 	return 0, nil
 }
 
-func countSessionDatabase(ctx context.Context, home, databaseName, table, timestampColumn, root string, since time.Time) (int, error) {
+func countSessionDatabase(ctx context.Context, home, databaseName, table, timestampColumn, sessionColumn, root string, since time.Time) (int, error) {
 	home = strings.TrimSpace(home)
 	if home == "" {
 		return 0, nil
@@ -274,25 +284,48 @@ func countSessionDatabase(ctx context.Context, home, databaseName, table, timest
 		return 0, fmt.Errorf("connect %s: %w", path, err)
 	}
 
-	rows, err := db.QueryContext(ctx, "SELECT cwd, "+timestampColumn+" FROM "+table)
+	query := "SELECT cwd, " + timestampColumn
+	if sessionColumn != "" {
+		query += ", " + sessionColumn
+	}
+	query += " FROM " + table
+	rows, err := db.QueryContext(ctx, query)
 	if err != nil {
 		return 0, fmt.Errorf("query %s: %w", path, err)
 	}
 	defer rows.Close()
 	count := 0
+	var seenSessions map[string]struct{}
+	if sessionColumn != "" {
+		seenSessions = make(map[string]struct{})
+	}
 	for rows.Next() {
 		var cwd string
 		var rawCreatedAt any
-		if err := rows.Scan(&cwd, &rawCreatedAt); err != nil {
-			return 0, fmt.Errorf("scan %s: %w", path, err)
+		var sessionID string
+		var scanErr error
+		if sessionColumn == "" {
+			scanErr = rows.Scan(&cwd, &rawCreatedAt)
+		} else {
+			scanErr = rows.Scan(&cwd, &rawCreatedAt, &sessionID)
+		}
+		if scanErr != nil {
+			return 0, fmt.Errorf("scan %s: %w", path, scanErr)
 		}
 		createdAt, err := parseTimestamp(rawCreatedAt)
 		if err != nil {
 			return 0, fmt.Errorf("parse created_at in %s: %w", path, err)
 		}
-		if !createdAt.Before(since) && pathWithinRoot(root, cwd) {
-			count++
+		if createdAt.Before(since) || !pathWithinRoot(root, cwd) {
+			continue
 		}
+		if sessionColumn != "" {
+			if _, exists := seenSessions[sessionID]; exists {
+				continue
+			}
+			seenSessions[sessionID] = struct{}{}
+		}
+		count++
 	}
 	if err := rows.Close(); err != nil {
 		return 0, fmt.Errorf("close %s: %w", path, err)

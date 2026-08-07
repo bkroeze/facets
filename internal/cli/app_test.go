@@ -13,6 +13,7 @@ import (
 
 	"facets.barnlab.dev/internal/project"
 	"facets.barnlab.dev/internal/status"
+	"facets.barnlab.dev/internal/store"
 )
 
 type fakeProvider struct {
@@ -419,6 +420,57 @@ func TestProjectsCommands(t *testing.T) {
 	var decoded map[string]any
 	if err := json.Unmarshal([]byte(stdout), &decoded); err != nil || decoded["project"] == nil {
 		t.Fatalf("show JSON err=%v: %s", err, stdout)
+	}
+}
+func TestProjectRegistrySetAndUnknownActivity(t *testing.T) {
+	root := t.TempDir()
+	if err := os.Mkdir(filepath.Join(root, ".jj"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	provider := &fakeProvider{projects: []project.Project{{ID: "demo", Name: "Demo"}}}
+	registry, err := store.Open(context.Background(), filepath.Join(root, "state", "facets.db"))
+	if err != nil {
+		t.Fatalf("store.Open() error = %v", err)
+	}
+	defer registry.Close()
+
+	var stdout, stderr bytes.Buffer
+	app := App{
+		Provider:     provider,
+		ProjectStore: registry,
+		Stdout:       &stdout,
+		Stderr:       &stderr,
+		Cwd:          root,
+		Env:          map[string]string{},
+		Summary:      &status.Builder{Activity: fakeActivitySource{activity: status.Activity{Sessions: map[string]int{"omp": 2}}}, PeriodDays: 1},
+	}
+	if code := app.Run(context.Background(), []string{"projects", "list"}); code != 0 {
+		t.Fatalf("projects list code=%d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+	}
+	if code := app.Run(context.Background(), []string{"projects", "set", "demo", "directory=" + root}); code != 0 {
+		t.Fatalf("projects set code=%d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+	}
+	registered, err := registry.RegisteredProject(context.Background(), "kata", "demo")
+	if err != nil {
+		t.Fatalf("RegisteredProject() error = %v", err)
+	}
+	if registered.Metadata["directory"] != root || registered.Source != "kata" || registered.FirstSeen.IsZero() {
+		t.Fatalf("registered project = %#v", registered)
+	}
+	stdout.Reset()
+	if code := app.Run(context.Background(), []string{"--json", "projects", "show", "demo"}); code != 0 {
+		t.Fatalf("projects show code=%d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+	}
+	if !strings.Contains(stdout.String(), `"metadata":{"directory":"`+root+`"}`) || !strings.Contains(stdout.String(), `"source":"kata"`) {
+		t.Fatalf("project metadata missing from show output: %s", stdout.String())
+	}
+
+	output, err := marshalJSON(statusDocument(status.Summary{Activity: status.Activity{Sessions: map[string]int{"omp": status.UnknownSessionCount}}}))
+	if err != nil {
+		t.Fatalf("marshal unknown activity: %v", err)
+	}
+	if !strings.Contains(string(output), `"omp":"??"`) {
+		t.Fatalf("unknown OMP count missing: %s", output)
 	}
 }
 
