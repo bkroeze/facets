@@ -157,7 +157,7 @@ func TestLocalActivitySourceCountsContainedRecentRows(t *testing.T) {
 	t.Setenv("OMP_HOME", ompHome)
 	jjDir := t.TempDir()
 	jjPath := filepath.Join(jjDir, "jj")
-	if err := os.WriteFile(jjPath, []byte("#!/bin/sh\nprintf '%s\\n%s\\n' '2026-08-02T00:00:00Z' '2026-07-31T00:00:00Z'\n"), 0o755); err != nil {
+	if err := os.WriteFile(jjPath, []byte("#!/bin/sh\ncase \" $* \" in\n  *\" --ignore-working-copy \"*) printf '%s\\n%s\\n' '2026-08-02T00:00:00Z' '2026-07-31T00:00:00Z' ;;\n  *) printf '%s\\n' 'The working copy is stale' >&2; exit 1 ;;\nesac\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv("PATH", jjDir+string(os.PathListSeparator)+os.Getenv("PATH"))

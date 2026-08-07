@@ -322,7 +322,7 @@ func pathWithinRoot(root, candidate string) bool {
 func countCommits(ctx context.Context, root string, since time.Time) (int, error) {
 	command := []string{"git", "log", "--all", "--format=%cI"}
 	if markerInfo, err := os.Stat(filepath.Join(root, ".jj")); err == nil && markerInfo.IsDir() {
-		command = []string{"jj", "log", "--no-graph", "-r", "all()", "-T", `committer.timestamp() ++ "\n"`}
+		command = []string{"jj", "log", "--ignore-working-copy", "--no-graph", "-r", "all()", "-T", `committer.timestamp() ++ "\n"`}
 	}
 	cmd := exec.CommandContext(ctx, command[0], command[1:]...)
 	cmd.Dir = root
