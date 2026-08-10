@@ -43,6 +43,15 @@ build:
 install:
     go install ./cmd/facets
 
+# Install the Quickshell GUI and icon into user XDG directories.
+install-gui:
+    @config_home="${XDG_CONFIG_HOME:-$HOME/.config}"; \
+      data_home="${XDG_DATA_HOME:-$HOME/.local/share}"; \
+      install -Dm644 quickshell/facets/shell.qml "$config_home/quickshell/facets/shell.qml"; \
+      install -Dm644 assets/facets.svg "$data_home/facets/facets.svg"; \
+      printf 'Installed Facets GUI to %s and icon to %s\n' \
+        "$config_home/quickshell/facets" "$data_home/facets/facets.svg"
+
 # Run formatting, tests, static analysis, and a build.
 check: fmt-check test vet build
 

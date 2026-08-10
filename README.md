@@ -213,21 +213,23 @@ From the Facets checkout:
 
 ```sh
 go install ./cmd/facets
-
-config_home="${XDG_CONFIG_HOME:-$HOME/.config}"
-data_home="${XDG_DATA_HOME:-$HOME/.local/share}"
-cache_home="${XDG_CACHE_HOME:-$HOME/.cache}"
-
-install -Dm644 quickshell/facets/shell.qml \
-  "$config_home/quickshell/facets/shell.qml"
+just install-gui
 ```
 
-The current widget has no external static assets or generated cache files.
-Future static assets belong under `$data_home/facets`; generated files belong
-under `$cache_home/facets`. Facets keeps its registry at
+`install-gui` respects `XDG_CONFIG_HOME` and `XDG_DATA_HOME`, with
+`$HOME/.config` and `$HOME/.local/share` fallbacks. It installs:
+
+```text
+$XDG_CONFIG_HOME/quickshell/facets/shell.qml
+$XDG_DATA_HOME/facets/facets.svg
+```
+
+The target owns only those app files; it does not edit Hyprland or Waybar.
+The current widget generates no cache files. Facets keeps its registry at
 `$HOME/.local/share/facets/facets.db` by default. To place it under a custom
 `XDG_DATA_HOME`, export
-`FACETS_DB="$data_home/facets/facets.db"` in the graphical session.
+`FACETS_DB="${XDG_DATA_HOME:-$HOME/.local/share}/facets/facets.db"` in the
+graphical session.
 
 Sync projects and configure every launchable working directory:
 
@@ -366,15 +368,17 @@ omarchy restart waybar
 ### Upgrade or uninstall
 
 To upgrade, pull the new checkout, rerun `go install ./cmd/facets`, and rerun
-the `install -Dm644` command above. Quickshell reloads an active config after
-the QML file changes; restart it if the process does not reload cleanly.
+`just install-gui`. Quickshell reloads an active config after the QML file
+changes; restart it if the process does not reload cleanly.
 
 To uninstall the widget:
 
 ```sh
 quickshell kill --config facets
 config_home="${XDG_CONFIG_HOME:-$HOME/.config}"
+data_home="${XDG_DATA_HOME:-$HOME/.local/share}"
 rm -rf "$config_home/quickshell/facets"
+rm -f "$data_home/facets/facets.svg"
 ```
 
 Also remove only the Facets lines you manually added to Hyprland and Waybar,
