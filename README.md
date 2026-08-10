@@ -122,6 +122,22 @@ facets tasks create --help
 facets tasks close --help
 ```
 
+### Task snapshot daemon
+
+`facets tasks daemon` is a foreground process for UI consumers. It writes one
+newline-delimited JSON event per line regardless of the global output format:
+
+```sh
+facets tasks daemon
+facets tasks daemon --interval 5s
+```
+
+A `snapshot` event replaces the prior project tree. An `error` event is
+recoverable; consumers should retain the last valid snapshot while the daemon
+retries. Runtime diagnostics go to stderr, never into the stdout protocol. Run
+`facets tasks daemon --help` for the complete event fields and polling limits.
+
+
 ## Project commands
 
 ```sh
@@ -148,6 +164,223 @@ wrong project.
 The current CLI exposes project listing, inspection, and local metadata
 configuration. Task mutations are delegated to the selected provider; Kata
 task deletion remains recoverable according to Kata's archive semantics.
+
+## Quickshell widget on Omarchy and Wayland
+
+The app in [`quickshell/facets/shell.qml`](quickshell/facets/shell.qml) is a
+single-screen Quickshell panel. It shows active Facets projects, expands each
+project into its open Kata tasks, and opens a floating Kata TUI in the selected
+project directory.
+
+### Prerequisites
+
+Install these before enabling the widget:
+
+- Quickshell 0.3 or newer;
+- Facets and Kata, with Kata JSON API version 1 configured;
+- Omarchy with Hyprland and UWSM;
+- `xdg-terminal-exec`, normally supplied by the Omarchy desktop;
+- `facets`, `kata`, `quickshell`, `uwsm-app`, and `xdg-terminal-exec` on the
+  graphical session's `PATH`.
+
+Check the interactive environment first:
+
+```sh
+quickshell --version
+command -v facets kata quickshell uwsm-app xdg-terminal-exec
+facets tasks daemon --interval 5s
+```
+
+The final command should immediately print one JSON `snapshot` line and remain
+running until interrupted. If it reports a provider error, fix Kata before
+starting Quickshell.
+
+Hyprland/UWSM does not necessarily inherit an interactive shell's startup
+files. Inspect the imported session path with:
+
+```sh
+systemctl --user show-environment | grep '^PATH='
+```
+
+Install Facets into a directory on that path. For a Go installation this is
+usually `$(go env GOPATH)/bin`; add that directory to the UWSM session
+environment if it is absent, then log out and back in. Do not rely on an alias
+or shell function: Quickshell launches argv directly.
+
+### Install or update the app
+
+From the Facets checkout:
+
+```sh
+go install ./cmd/facets
+
+config_home="${XDG_CONFIG_HOME:-$HOME/.config}"
+data_home="${XDG_DATA_HOME:-$HOME/.local/share}"
+cache_home="${XDG_CACHE_HOME:-$HOME/.cache}"
+
+install -Dm644 quickshell/facets/shell.qml \
+  "$config_home/quickshell/facets/shell.qml"
+```
+
+The current widget has no external static assets or generated cache files.
+Future static assets belong under `$data_home/facets`; generated files belong
+under `$cache_home/facets`. Facets keeps its registry at
+`$HOME/.local/share/facets/facets.db` by default. To place it under a custom
+`XDG_DATA_HOME`, export
+`FACETS_DB="$data_home/facets/facets.db"` in the graphical session.
+
+Sync projects and configure every launchable working directory:
+
+```sh
+facets projects list
+facets projects set facets directory="$HOME/Projects/facets"
+facets projects set thornwear directory="$HOME/Projects/thornwear"
+```
+
+The panel deliberately disables the open control for a project whose
+`directory` is missing. It never falls back to the panel's own working
+directory.
+
+Run the installed config in the foreground before adding autostart:
+
+```sh
+quickshell --config facets
+```
+
+The panel starts hidden. In another terminal, exercise its public IPC methods:
+
+```sh
+quickshell ipc --config facets call facets toggle
+quickshell ipc --config facets call facets -- show
+quickshell ipc --config facets call facets -- hide
+```
+
+The `--` separator keeps `show` and `hide` from being interpreted as
+Quickshell IPC subcommands on versions where those names are reserved.
+
+### Start with Omarchy
+
+Manually merge this line into `~/.config/hypr/autostart.conf`:
+
+```ini
+exec-once = uwsm-app -- quickshell --no-duplicate --config facets
+```
+
+Do not replace the file and do not edit anything under
+`~/.local/share/omarchy/`; that tree is managed by Omarchy updates.
+
+Optionally merge a toggle binding into `~/.config/hypr/bindings.conf` after
+checking that the key is unused:
+
+```ini
+bindd = SUPER SHIFT, F, Facets project tasks, exec, quickshell ipc --config facets call facets toggle
+```
+
+Apply and validate only the Hyprland changes:
+
+```sh
+hyprctl reload
+hyprctl configerrors
+```
+
+`hyprctl configerrors` must print nothing.
+
+### Floating Kata terminals
+
+The open control resolves absolute paths for `uwsm-app`,
+`xdg-terminal-exec`, and `kata`, then launches:
+
+```text
+uwsm-app -a facets-kata -d "Facets Kata TUI - <project>" -- \
+  xdg-terminal-exec --app-id=TUI.float \
+  --title="Facets Kata - <project>" --dir=<configured-directory> -- \
+  kata tui
+```
+
+Arguments remain separate argv values; project names and paths are never
+interpolated into a shell command. Omarchy's stock Hyprland rules float,
+center, and size only terminal windows carrying the `TUI.float` app ID.
+Ordinary terminal windows retain their normal tiled behavior. Confirm the
+installed behavior with:
+
+```sh
+hyprctl clients
+hyprctl configerrors
+```
+
+Look for class `TUI.float`, title `Facets Kata - <project>`, and
+`floating: 1`. Hyprland window-rule syntax changes between releases; verify
+custom rules against the documentation matching `hyprctl version`. For
+Hyprland 0.56, use the
+[0.56 window-rule reference](https://wiki.hypr.land/0.56.0/Configuring/Basics/Window-Rules/).
+Do not add a rule that floats the normal Ghostty, Alacritty, Foot, or Kitty
+class.
+
+### Optional Waybar launcher
+
+The widget does not modify Waybar. To add a text launcher, manually add
+`custom/facets` to one of the module lists in
+`~/.config/waybar/config.jsonc`, then merge this module definition:
+
+```jsonc
+"custom/facets": {
+  "format": "F",
+  "tooltip-format": "Facets project tasks",
+  "on-click": "quickshell ipc --config facets call facets toggle"
+}
+```
+
+Optional styling in `~/.config/waybar/style.css`:
+
+```css
+#custom-facets {
+  margin: 0 8px;
+  color: inherit;
+}
+```
+
+Reload Waybar without resetting its configuration:
+
+```sh
+omarchy restart waybar
+```
+
+### Troubleshooting
+
+- Run `facets tasks daemon --interval 5s` directly. Stdout must contain only
+  JSON events; provider and registry diagnostics appear on stderr.
+- Run `quickshell --path quickshell/facets` from the checkout to keep QML,
+  process, and parser errors in the foreground.
+- Run `quickshell ipc --config facets show` to list the `facets` target and
+  its methods.
+- If the panel says the daemon disconnected, verify the graphical `PATH`, then
+  check that `facets` and `kata` resolve there. The panel retains its last valid
+  project tree while retrying.
+- If the open control is a muted dash, configure that project's `directory`
+  with `facets projects set`.
+- If a terminal launch fails, verify `uwsm-app`, `xdg-terminal-exec`, and
+  `kata` are executable from the graphical session.
+- After Hyprland edits, run `hyprctl reload` followed by
+  `hyprctl configerrors`. After Waybar edits, run `omarchy restart waybar`.
+
+### Upgrade or uninstall
+
+To upgrade, pull the new checkout, rerun `go install ./cmd/facets`, and rerun
+the `install -Dm644` command above. Quickshell reloads an active config after
+the QML file changes; restart it if the process does not reload cleanly.
+
+To uninstall the widget:
+
+```sh
+quickshell kill --config facets
+config_home="${XDG_CONFIG_HOME:-$HOME/.config}"
+rm -rf "$config_home/quickshell/facets"
+```
+
+Also remove only the Facets lines you manually added to Hyprland and Waybar,
+then run `hyprctl reload` and, if applicable, `omarchy restart waybar`. The
+uninstall intentionally leaves the Facets binary, Kata data, Facets registry,
+and any user data or cache in place.
 
 ## Web dashboard shell
 
