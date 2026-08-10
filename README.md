@@ -222,6 +222,7 @@ just install-gui
 ```text
 $XDG_CONFIG_HOME/quickshell/facets/shell.qml
 $XDG_DATA_HOME/facets/facets.svg
+$XDG_DATA_HOME/facets/facets-waybar.svg
 ```
 
 The target owns only those app files; it does not edit Hyprland or Waybar.
@@ -318,26 +319,32 @@ Hyprland 0.56, use the
 Do not add a rule that floats the normal Ghostty, Alacritty, Foot, or Kitty
 class.
 
-### Optional Waybar launcher
+### Waybar launcher
 
-The widget does not modify Waybar. To add a text launcher, manually add
-`custom/facets` to one of the module lists in
+`just install-gui` preserves the specified source SVG as `facets.svg` and
+installs a white Waybar rendering at
+`${XDG_DATA_HOME:-$HOME/.local/share}/facets/facets-waybar.svg`. To reproduce
+the Waybar launcher, manually add `image#facets` to one of the module lists in
 `~/.config/waybar/config.jsonc`, then merge this module definition:
 
 ```jsonc
-"custom/facets": {
-  "format": "F",
-  "tooltip-format": "Facets project tasks",
+"image#facets": {
+  "exec": "printf '%s\\n' \"${XDG_DATA_HOME:-$HOME/.local/share}/facets/facets-waybar.svg\"",
+  "interval": 300,
+  "size": 14,
+  "tooltip": true,
   "on-click": "quickshell ipc --config facets call facets toggle"
 }
 ```
 
-Optional styling in `~/.config/waybar/style.css`:
+The same click command opens the Facets panel when hidden and closes it when
+visible. It depends on the Quickshell autostart entry above.
+
+Merge this styling into `~/.config/waybar/style.css`:
 
 ```css
-#custom-facets {
-  margin: 0 8px;
-  color: inherit;
+#image-facets {
+  margin: 0 14px 0 8px;
 }
 ```
 
@@ -378,7 +385,7 @@ quickshell kill --config facets
 config_home="${XDG_CONFIG_HOME:-$HOME/.config}"
 data_home="${XDG_DATA_HOME:-$HOME/.local/share}"
 rm -rf "$config_home/quickshell/facets"
-rm -f "$data_home/facets/facets.svg"
+rm -f "$data_home/facets/facets.svg" "$data_home/facets/facets-waybar.svg"
 ```
 
 Also remove only the Facets lines you manually added to Hyprland and Waybar,
