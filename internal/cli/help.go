@@ -17,13 +17,14 @@ func topHelp() object {
 
 func tasksHelp() object {
 	return helpDocument(
-		"facets tasks [list|show|create|edit|close|reopen|delete]",
+		"facets tasks [list|show|create|edit|close|reopen|delete|daemon]",
 		"List defaults to open tasks when no task command is supplied",
 		table{columns: []string{"command", "required", "description"}, rows: [][]any{
 			{"list", "", "list tasks"}, {"show", "<id>", "show one task"},
 			{"create", "<title>", "create a task"}, {"edit", "<id> and an edit flag", "update task fields"},
 			{"close", "<id>, --message, --evidence <type:value>", "close with completion context"},
 			{"reopen", "<id>", "reopen a task"}, {"delete", "<id>, --confirm <id>", "delete without prompting"},
+			{"daemon", "", "stream project and open-task snapshots as NDJSON"},
 		}},
 		primitiveArray{"facets tasks", "facets tasks show T-123", "facets tasks create \"Fix login\" --priority 2"}, nil,
 	)
@@ -35,6 +36,19 @@ func tasksListHelp() object {
 			{"--status <open|closed|all>", "open", "task status"},
 			{"--fields <list>", "id,title,status", "subset of id,title,status,priority,assignee,updated"},
 		}}, primitiveArray{"facets tasks", "facets tasks list --status all", "facets tasks --fields id,title,priority,updated"}, nil)
+}
+
+func taskDaemonHelp() object {
+	return helpDocument(
+		"facets tasks daemon [--interval <duration>]",
+		"Stream newline-delimited JSON events for UI consumers; this command always writes JSON regardless of the global output format",
+		table{columns: []string{"name", "default", "description"}, rows: [][]any{
+			{"--interval <duration>", "2s", "provider polling interval from 250ms through 5m"},
+			{"snapshot event", "", `{"type":"snapshot","projects":[{"id","name","directory","tasks":[{"id","title","status","priority","assignee","updated_at"}]}]}`},
+			{"error event", "", `{"type":"error","message":"...","retrying":true}; retain the last valid snapshot`},
+		}},
+		primitiveArray{"facets tasks daemon", "facets tasks daemon --interval 5s"}, nil,
+	)
 }
 
 func taskShowHelp() object {

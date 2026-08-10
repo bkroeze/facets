@@ -26,17 +26,18 @@ var errProjectNotDiscovered = errors.New("project not discovered")
 // for a single-provider embedding; Registry is used when more than one provider
 // is available.
 type App struct {
-	Registry     *project.Registry
-	Provider     project.Provider
-	Summary      *status.Builder
-	ProjectStore *store.Store
-	Stdout       io.Writer
-	Stderr       io.Writer
-	Cwd          string
-	Env          map[string]string
-	Getenv       func(string) string
-	Executable   string
-	Serve        func(context.Context, string) error
+	Registry           *project.Registry
+	Provider           project.Provider
+	Summary            *status.Builder
+	ProjectStore       *store.Store
+	Stdout             io.Writer
+	Stderr             io.Writer
+	Cwd                string
+	Env                map[string]string
+	Getenv             func(string) string
+	Executable         string
+	Serve              func(context.Context, string) error
+	TaskDaemonInterval time.Duration
 }
 
 type runConfig struct {
@@ -186,7 +187,7 @@ func (a *App) runTasks(ctx context.Context, stdout, stderr io.Writer, cfg runCon
 	command := "list"
 	if len(args) > 0 {
 		switch args[0] {
-		case "list", "show", "create", "edit", "close", "reopen", "delete":
+		case "list", "show", "create", "edit", "close", "reopen", "delete", "daemon":
 			command = args[0]
 			args = args[1:]
 		default:
@@ -212,6 +213,8 @@ func (a *App) runTasks(ctx context.Context, stdout, stderr io.Writer, cfg runCon
 			a.write(stdout, cfg.format, taskReopenHelp())
 		case "delete":
 			a.write(stdout, cfg.format, taskDeleteHelp())
+		case "daemon":
+			a.write(stdout, cfg.format, taskDaemonHelp())
 		}
 		return 0
 	}
@@ -228,6 +231,8 @@ func (a *App) runTasks(ctx context.Context, stdout, stderr io.Writer, cfg runCon
 		return a.closeTask(ctx, stdout, stderr, cfg, args)
 	case "reopen":
 		return a.reopenTask(ctx, stdout, stderr, cfg, args)
+	case "daemon":
+		return a.runTaskDaemon(ctx, stdout, stderr, cfg, args)
 	default:
 		return a.deleteTask(ctx, stdout, stderr, cfg, args)
 	}
