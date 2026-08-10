@@ -14,6 +14,11 @@ ShellRoot {
     property string refreshError: ""
     property string parseError: ""
     property string daemonStderr: ""
+    property string launchError: ""
+    property string launchNotice: ""
+    property string launchingProjectId: ""
+    property var pendingProject: null
+    property var resolvedTools: []
     property var projects: []
     property var expandedProjects: ({})
     property int restartAttempt: 0
@@ -116,6 +121,23 @@ ShellRoot {
         expandedProjects = next;
     }
 
+    function launchProject(project) {
+        if (launchingProjectId !== "")
+            return;
+        launchNotice = "";
+        launchError = "";
+        if (project.directory === "") {
+            launchError = "Set a working directory first: facets projects set "
+                + project.id + " directory=<path>";
+            return;
+        }
+
+        pendingProject = project;
+        launchingProjectId = project.id;
+        directoryProbe.command = ["/usr/bin/test", "-d", project.directory];
+        directoryProbe.running = true;
+    }
+
     IpcHandler {
         target: "facets"
 
@@ -163,6 +185,74 @@ ShellRoot {
         interval: 1000
         repeat: false
         onTriggered: daemon.running = true
+    }
+
+    Process {
+        id: directoryProbe
+
+        onExited: (exitCode, exitStatus) => {
+            if (exitCode !== 0) {
+                shell.launchError = "Configured directory does not exist: " + shell.pendingProject.directory;
+                shell.launchingProjectId = "";
+                shell.pendingProject = null;
+                return;
+            }
+            shell.resolvedTools = [];
+            toolResolver.running = true;
+        }
+    }
+
+    Process {
+        id: toolResolver
+        command: ["/usr/bin/which", "uwsm-app", "xdg-terminal-exec", "kata"]
+
+        stdout: SplitParser {
+            onRead: data => {
+                const path = data.trim();
+                if (path !== "")
+                    shell.resolvedTools = shell.resolvedTools.concat([path]);
+            }
+        }
+
+        onExited: (exitCode, exitStatus) => {
+            if (exitCode !== 0 || shell.resolvedTools.length !== 3) {
+                shell.launchError = "Launch requires uwsm-app, xdg-terminal-exec, and kata in the graphical session PATH.";
+                shell.launchingProjectId = "";
+                shell.pendingProject = null;
+                return;
+            }
+
+            const project = shell.pendingProject;
+            terminalLauncher.command = [
+                shell.resolvedTools[0],
+                "-a", "facets-kata",
+                "-d", "Facets Kata TUI - " + project.name,
+                "--",
+                shell.resolvedTools[1],
+                "--app-id=TUI.float",
+                "--title=Facets Kata - " + project.name,
+                "--dir=" + project.directory,
+                "--",
+                shell.resolvedTools[2], "tui"
+            ];
+            terminalLauncher.startDetached();
+            shell.launchNotice = "Opened Kata TUI for " + project.name;
+            launchSettledTimer.restart();
+        }
+    }
+
+    Process {
+        id: terminalLauncher
+    }
+
+    Timer {
+        id: launchSettledTimer
+        interval: 1200
+        repeat: false
+        onTriggered: {
+            shell.launchingProjectId = "";
+            shell.pendingProject = null;
+        }
     }
 
     Component.onCompleted: daemon.running = true
@@ -269,13 +359,13 @@ ShellRoot {
                 }
 
                 Rectangle {
-                    visible: shell.refreshError !== "" || shell.parseError !== "" || shell.disconnected
+                    visible: shell.launchError !== "" || shell.refreshError !== "" || shell.parseError !== "" || shell.disconnected
                     Layout.fillWidth: true
                     implicitHeight: statusColumn.implicitHeight + 18
                     radius: 9
-                    color: shell.parseError !== "" ? "#3a2429" : "#302b20"
+                    color: shell.launchError !== "" || shell.parseError !== "" ? "#3a2429" : "#302b20"
                     border.width: 1
-                    border.color: shell.parseError !== "" ? "#70404a" : "#66583a"
+                    border.color: shell.launchError !== "" || shell.parseError !== "" ? "#70404a" : "#66583a"
 
                     ColumnLayout {
                         id: statusColumn
@@ -285,11 +375,13 @@ ShellRoot {
 
                         Text {
                             Layout.fillWidth: true
-                            text: shell.parseError !== ""
-                                ? shell.parseError
-                                : shell.refreshError !== ""
-                                    ? "Refresh failed: " + shell.refreshError
-                                    : "Task daemon disconnected; retrying"
+                            text: shell.launchError !== ""
+                                ? shell.launchError
+                                : shell.parseError !== ""
+                                    ? shell.parseError
+                                    : shell.refreshError !== ""
+                                        ? "Refresh failed: " + shell.refreshError
+                                        : "Task daemon disconnected; retrying"
                             color: "#f4d6a0"
                             font.pixelSize: 11
                             wrapMode: Text.Wrap
@@ -304,6 +396,15 @@ ShellRoot {
                             elide: Text.ElideRight
                         }
                     }
+                }
+
+                Text {
+                    visible: shell.launchNotice !== ""
+                    Layout.fillWidth: true
+                    text: shell.launchNotice
+                    color: "#8fc9a3"
+                    font.pixelSize: 10
+                    elide: Text.ElideRight
                 }
 
                 Rectangle {
@@ -401,6 +502,7 @@ ShellRoot {
                                         Accessible.name: (projectCard.expanded ? "Collapse " : "Expand ") + projectCard.modelData.name
                                         Layout.fillWidth: true
                                         Layout.preferredHeight: 50
+                                        rightPadding: 48
                                         flat: true
                                         onClicked: shell.toggleProject(projectCard.modelData.id)
 
@@ -551,6 +653,52 @@ ShellRoot {
                                                 }
                                             }
                                         }
+                                    }
+                                }
+
+                                Button {
+                                    id: openButton
+                                    anchors.top: parent.top
+                                    anchors.right: parent.right
+                                    anchors.topMargin: 9
+                                    anchors.rightMargin: 8
+                                    width: 32
+                                    height: 32
+                                    enabled: projectCard.modelData.directory !== "" && shell.launchingProjectId === ""
+                                    opacity: 1
+                                    Accessible.name: "Open Kata TUI for " + projectCard.modelData.name
+                                    Accessible.description: projectCard.modelData.directory === ""
+                                        ? "Configure with facets projects set " + projectCard.modelData.id + " directory=<path>"
+                                        : "Open a floating terminal in " + projectCard.modelData.directory
+                                    text: projectCard.modelData.directory === ""
+                                        ? "—"
+                                        : shell.launchingProjectId === projectCard.modelData.id ? "…" : "↗"
+                                    flat: true
+                                    onClicked: shell.launchProject(projectCard.modelData)
+
+                                    ToolTip.visible: hovered
+                                    ToolTip.delay: 400
+                                    ToolTip.text: projectCard.modelData.directory === ""
+                                        ? "Configure a project directory first"
+                                        : "Open Kata TUI"
+
+                                    contentItem: Text {
+                                        text: openButton.text
+                                        color: projectCard.modelData.directory === ""
+                                            ? "#5f6978"
+                                            : openButton.hovered ? "#ffffff" : "#aebcff"
+                                        font.pixelSize: 15
+                                        horizontalAlignment: Text.AlignHCenter
+                                        verticalAlignment: Text.AlignVCenter
+                                    }
+
+                                    background: Rectangle {
+                                        radius: 7
+                                        color: projectCard.modelData.directory === ""
+                                            ? "#1d2430"
+                                            : openButton.hovered ? "#3a4c78" : "#293552"
+                                        border.width: 1
+                                        border.color: projectCard.modelData.directory === "" ? "#303947" : "#52699f"
                                     }
                                 }
                             }
