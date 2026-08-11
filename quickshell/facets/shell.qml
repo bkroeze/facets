@@ -23,6 +23,36 @@ ShellRoot {
     property var expandedProjects: ({})
     property int restartAttempt: 0
 
+    // Action-dialog tokens extend the panel's existing compact dark palette.
+    readonly property color actionSurface: "#171c25"
+    readonly property color actionSurfaceRaised: "#202733"
+    readonly property color actionBorder: "#3a4352"
+    readonly property color actionAccent: "#6f8cff"
+    readonly property color actionDanger: "#d97782"
+    readonly property color actionText: "#edf0f5"
+    readonly property color actionMutedText: "#8993a4"
+    readonly property color actionSuccess: "#8fc9a3"
+    readonly property color actionErrorSurface: "#3a2429"
+    readonly property color actionAccentMuted: "#52699f"
+    readonly property color actionScrim: "#990b0e14"
+    readonly property color actionErrorBorder: "#70404a"
+    readonly property color actionErrorText: "#f4d6a0"
+    readonly property int space1: 4
+    readonly property int space2: 8
+    readonly property int space3: 12
+    readonly property int space4: 16
+    readonly property int controlRadius: 8
+
+    property string taskActionKind: ""
+    property string taskActionProjectId: ""
+    property string taskActionId: ""
+    property string taskActionTitle: ""
+    property bool taskActionBusy: false
+    property string taskActionStdout: ""
+    property string taskActionStderr: ""
+    property string taskActionError: ""
+    property string taskActionNotice: ""
+
     function isTask(value) {
         return value !== null
             && typeof value === "object"
@@ -138,6 +168,91 @@ ShellRoot {
         directoryProbe.running = true;
     }
 
+    function openTaskAction(kind, projectId, task) {
+        if (taskActionBusy || taskActionDialog.opened)
+            return;
+
+        taskActionKind = kind;
+        taskActionProjectId = projectId;
+        taskActionId = task.id;
+        taskActionTitle = task.title;
+        taskActionError = "";
+        taskActionNotice = "";
+        taskActionText.text = "";
+        taskActionDialog.open();
+    }
+
+    function actionFailureMessage(exitCode, exitStatus) {
+        const output = taskActionStdout.trim();
+        if (output !== "") {
+            try {
+                const document = JSON.parse(output);
+                if (document !== null
+                        && typeof document === "object"
+                        && document.error !== null
+                        && typeof document.error === "object"
+                        && typeof document.error.message === "string"
+                        && document.error.message.trim() !== "")
+                    return document.error.message.trim();
+                if (document !== null
+                        && typeof document === "object"
+                        && typeof document.message === "string"
+                        && document.message.trim() !== "")
+                    return document.message.trim();
+            } catch (error) {
+                // JSON command output is intentionally not shown verbatim in the panel.
+            }
+        }
+
+        const stderrLines = taskActionStderr.split("\n");
+        for (let index = 0; index < stderrLines.length; ++index) {
+            const line = stderrLines[index].trim();
+            if (line !== "" && !line.startsWith("{") && !line.startsWith("["))
+                return line;
+        }
+        if (exitStatus !== 0)
+            return "The facets process ended unexpectedly.";
+        return "facets could not complete the action (exit code " + exitCode + ").";
+    }
+
+    function submitTaskAction() {
+        if (taskActionBusy)
+            return;
+
+        const comment = taskActionText.text.trim();
+        if (taskActionKind === "comment" && comment === "") {
+            taskActionError = "Enter a comment before submitting.";
+            taskActionText.forceActiveFocus();
+            return;
+        }
+
+        let command = [
+            "facets",
+            "--project", taskActionProjectId,
+            "--format", "json",
+            "tasks"
+        ];
+        if (taskActionKind === "comment") {
+            command = command.concat(["comment", taskActionId, "--body", comment]);
+        } else {
+            command = command.concat([
+                "close", taskActionId,
+                "--message", "Closed manually from the Facets QuickShell task panel",
+                "--evidence", "test:manual confirmation in Facets QuickShell"
+            ]);
+            if (comment !== "")
+                command = command.concat(["--comment", comment]);
+        }
+
+        taskActionError = "";
+        taskActionNotice = "";
+        taskActionStdout = "";
+        taskActionStderr = "";
+        taskActionBusy = true;
+        taskActionProcess.command = command;
+        taskActionProcess.running = true;
+    }
+
     IpcHandler {
         target: "facets"
 
@@ -152,6 +267,7 @@ ShellRoot {
         function hide(): void {
             shell.panelVisible = false;
         }
+
     }
 
     Process {
@@ -255,6 +371,32 @@ ShellRoot {
         }
     }
 
+    Process {
+        id: taskActionProcess
+
+        stdout: SplitParser {
+            onRead: data => shell.taskActionStdout += data + "\n"
+        }
+
+        stderr: SplitParser {
+            onRead: data => shell.taskActionStderr += data + "\n"
+        }
+
+        onExited: (exitCode, exitStatus) => {
+            shell.taskActionBusy = false;
+            if (exitCode !== 0 || exitStatus !== 0) {
+                shell.taskActionError = shell.actionFailureMessage(exitCode, exitStatus);
+                return;
+            }
+
+            shell.taskActionNotice = shell.taskActionKind === "comment"
+                ? "Comment added to " + shell.taskActionId + "."
+                : "Closed " + shell.taskActionId + ".";
+            shell.taskActionError = "";
+            taskActionDialog.close();
+        }
+    }
+
     Component.onCompleted: daemon.running = true
 
     PanelWindow {
@@ -287,7 +429,10 @@ ShellRoot {
             border.width: 1
             border.color: "#3a4352"
 
-            Keys.onEscapePressed: shell.panelVisible = false
+            Keys.onEscapePressed: {
+                if (!shell.taskActionBusy && !taskActionDialog.opened)
+                    shell.panelVisible = false;
+            }
 
             ColumnLayout {
                 id: panelColumn
@@ -359,13 +504,13 @@ ShellRoot {
                 }
 
                 Rectangle {
-                    visible: shell.launchError !== "" || shell.refreshError !== "" || shell.parseError !== "" || shell.disconnected
+                    visible: shell.taskActionError !== "" || shell.launchError !== "" || shell.refreshError !== "" || shell.parseError !== "" || shell.disconnected
                     Layout.fillWidth: true
                     implicitHeight: statusColumn.implicitHeight + 18
                     radius: 9
-                    color: shell.launchError !== "" || shell.parseError !== "" ? "#3a2429" : "#302b20"
+                    color: shell.taskActionError !== "" || shell.launchError !== "" || shell.parseError !== "" ? "#3a2429" : "#302b20"
                     border.width: 1
-                    border.color: shell.launchError !== "" || shell.parseError !== "" ? "#70404a" : "#66583a"
+                    border.color: shell.taskActionError !== "" || shell.launchError !== "" || shell.parseError !== "" ? "#70404a" : "#66583a"
 
                     ColumnLayout {
                         id: statusColumn
@@ -375,13 +520,15 @@ ShellRoot {
 
                         Text {
                             Layout.fillWidth: true
-                            text: shell.launchError !== ""
-                                ? shell.launchError
-                                : shell.parseError !== ""
-                                    ? shell.parseError
-                                    : shell.refreshError !== ""
-                                        ? "Refresh failed: " + shell.refreshError
-                                        : "Task daemon disconnected; retrying"
+                            text: shell.taskActionError !== ""
+                                ? shell.taskActionError
+                                : shell.launchError !== ""
+                                    ? shell.launchError
+                                    : shell.parseError !== ""
+                                        ? shell.parseError
+                                        : shell.refreshError !== ""
+                                            ? "Refresh failed: " + shell.refreshError
+                                            : "Task daemon disconnected; retrying"
                             color: "#f4d6a0"
                             font.pixelSize: 11
                             wrapMode: Text.Wrap
@@ -399,12 +546,13 @@ ShellRoot {
                 }
 
                 Text {
-                    visible: shell.launchNotice !== ""
+                    visible: shell.taskActionNotice !== "" || shell.launchNotice !== ""
                     Layout.fillWidth: true
-                    text: shell.launchNotice
-                    color: "#8fc9a3"
+                    text: shell.taskActionNotice !== "" ? shell.taskActionNotice : shell.launchNotice
+                    color: shell.actionSuccess
                     font.pixelSize: 10
                     elide: Text.ElideRight
+                    Accessible.name: text
                 }
 
                 Rectangle {
@@ -605,24 +753,24 @@ ShellRoot {
                                         Repeater {
                                             model: projectCard.modelData.tasks
 
-                                            delegate: RowLayout {
+                                            delegate: ColumnLayout {
                                                 id: taskRow
                                                 required property var modelData
                                                 required property int index
                                                 Layout.fillWidth: true
-                                                Layout.minimumHeight: 30
-                                                spacing: 8
+                                                Layout.minimumHeight: 56
+                                                spacing: shell.space1
 
-                                                Text {
-                                                    Layout.preferredWidth: 13
-                                                    text: taskRow.index === projectCard.modelData.tasks.length - 1 ? "└" : "├"
-                                                    color: "#59667a"
-                                                    font.pixelSize: 12
-                                                }
-
-                                                ColumnLayout {
+                                                RowLayout {
                                                     Layout.fillWidth: true
-                                                    spacing: 0
+                                                    spacing: shell.space2
+
+                                                    Text {
+                                                        Layout.preferredWidth: 13
+                                                        text: taskRow.index === projectCard.modelData.tasks.length - 1 ? "└" : "├"
+                                                        color: "#59667a"
+                                                        font.pixelSize: 12
+                                                    }
 
                                                     Text {
                                                         Layout.fillWidth: true
@@ -633,23 +781,95 @@ ShellRoot {
                                                     }
 
                                                     Text {
-                                                        visible: taskRow.modelData.assignee !== "" || taskRow.modelData.priority !== null
+                                                        Layout.preferredWidth: 44
+                                                        horizontalAlignment: Text.AlignRight
+                                                        text: taskRow.modelData.id
+                                                        color: "#697487"
+                                                        font.family: "monospace"
+                                                        font.pixelSize: 9
+                                                        elide: Text.ElideLeft
+                                                    }
+                                                }
+
+                                                RowLayout {
+                                                    Layout.fillWidth: true
+                                                    Layout.leftMargin: shell.space3
+                                                    spacing: shell.space2
+
+                                                    Text {
                                                         Layout.fillWidth: true
                                                         text: (taskRow.modelData.priority !== null ? "P" + taskRow.modelData.priority : "")
                                                             + (taskRow.modelData.priority !== null && taskRow.modelData.assignee !== "" ? " · " : "")
                                                             + taskRow.modelData.assignee
                                                         color: "#747f90"
                                                         font.pixelSize: 9
+                                                        elide: Text.ElideRight
                                                     }
-                                                }
 
-                                                Text {
-                                                    Layout.preferredWidth: 38
-                                                    horizontalAlignment: Text.AlignRight
-                                                    text: taskRow.modelData.id
-                                                    color: "#697487"
-                                                    font.family: "monospace"
-                                                    font.pixelSize: 9
+                                                    Button {
+                                                        id: commentButton
+                                                        Layout.preferredWidth: 64
+                                                        Layout.preferredHeight: 28
+                                                        enabled: !shell.taskActionBusy && !taskActionDialog.opened
+                                                        text: "Comment"
+                                                        flat: true
+                                                        Accessible.name: "Comment on task " + taskRow.modelData.id + ": " + taskRow.modelData.title
+                                                        Accessible.description: "Open a text prompt for a required task comment"
+                                                        onClicked: shell.openTaskAction("comment", projectCard.modelData.id, taskRow.modelData)
+
+                                                        ToolTip.visible: hovered
+                                                        ToolTip.delay: 400
+                                                        ToolTip.text: "Add a comment"
+
+                                                        contentItem: Text {
+                                                            text: commentButton.text
+                                                            color: commentButton.enabled ? shell.actionText : shell.actionMutedText
+                                                            font.pixelSize: 10
+                                                            horizontalAlignment: Text.AlignHCenter
+                                                            verticalAlignment: Text.AlignVCenter
+                                                        }
+
+                                                        background: Rectangle {
+                                                            radius: shell.controlRadius
+                                                            color: commentButton.hovered || commentButton.activeFocus
+                                                                ? shell.actionSurfaceRaised : shell.actionSurface
+                                                            border.width: 1
+                                                            border.color: commentButton.activeFocus ? shell.actionAccent : shell.actionBorder
+                                                        }
+                                                    }
+
+                                                    Button {
+                                                        id: closeTaskButton
+                                                        Layout.preferredWidth: 52
+                                                        Layout.preferredHeight: 28
+                                                        enabled: !shell.taskActionBusy && !taskActionDialog.opened
+                                                        text: "Close"
+                                                        flat: true
+                                                        Accessible.name: "Close task " + taskRow.modelData.id + ": " + taskRow.modelData.title
+                                                        Accessible.description: "Open an explicit close confirmation with an optional comment"
+                                                        onClicked: shell.openTaskAction("close", projectCard.modelData.id, taskRow.modelData)
+
+                                                        ToolTip.visible: hovered
+                                                        ToolTip.delay: 400
+                                                        ToolTip.text: "Close with audit evidence"
+
+                                                        contentItem: Text {
+                                                            text: closeTaskButton.text
+                                                            color: closeTaskButton.enabled ? shell.actionDanger : shell.actionMutedText
+                                                            font.pixelSize: 10
+                                                            font.weight: Font.Medium
+                                                            horizontalAlignment: Text.AlignHCenter
+                                                            verticalAlignment: Text.AlignVCenter
+                                                        }
+
+                                                        background: Rectangle {
+                                                            radius: shell.controlRadius
+                                                            color: closeTaskButton.hovered || closeTaskButton.activeFocus
+                                                                ? shell.actionErrorSurface : shell.actionSurface
+                                                            border.width: 1
+                                                            border.color: closeTaskButton.activeFocus ? shell.actionDanger : shell.actionBorder
+                                                        }
+                                                    }
                                                 }
                                             }
                                         }
@@ -701,6 +921,228 @@ ShellRoot {
                                         border.color: projectCard.modelData.directory === "" ? "#303947" : "#52699f"
                                     }
                                 }
+                            }
+                        }
+                    }
+                }
+            }
+            Popup {
+                id: taskActionDialog
+                parent: Overlay.overlay
+                anchors.centerIn: parent
+                width: Math.min(392, panel.width - shell.space4 * 2)
+                implicitHeight: taskActionContent.implicitHeight + topPadding + bottomPadding
+                padding: shell.space4
+                modal: true
+                focus: true
+                closePolicy: shell.taskActionBusy ? Popup.NoAutoClose : Popup.CloseOnEscape
+
+                Overlay.modal: Rectangle {
+                    color: shell.actionScrim
+                }
+
+                onOpened: Qt.callLater(() => taskActionText.forceActiveFocus())
+                onClosed: {
+                    if (!shell.taskActionBusy) {
+                        taskActionText.text = "";
+                        shell.taskActionError = "";
+                    }
+                }
+
+                background: Rectangle {
+                    color: shell.actionSurface
+                    radius: 12
+                    border.width: 1
+                    border.color: shell.actionBorder
+                }
+
+                contentItem: ColumnLayout {
+                    id: taskActionContent
+                    spacing: shell.space3
+                    Accessible.role: Accessible.Dialog
+                    Accessible.name: shell.taskActionKind === "comment"
+                        ? "Comment on task " + shell.taskActionId
+                        : "Confirm closing task " + shell.taskActionId
+
+                    Text {
+                        Layout.fillWidth: true
+                        text: shell.taskActionKind === "comment"
+                            ? "Comment on " + shell.taskActionId
+                            : "Close " + shell.taskActionId + "?"
+                        color: shell.actionText
+                        font.pixelSize: 15
+                        font.weight: Font.DemiBold
+                        wrapMode: Text.Wrap
+                    }
+
+                    Text {
+                        Layout.fillWidth: true
+                        text: shell.taskActionTitle
+                        color: shell.actionMutedText
+                        font.pixelSize: 11
+                        wrapMode: Text.Wrap
+                    }
+
+                    Text {
+                        visible: shell.taskActionKind === "close"
+                        Layout.fillWidth: true
+                        text: "This marks the task closed with a manual-confirmation audit message and evidence."
+                        color: shell.actionErrorText
+                        font.pixelSize: 10
+                        wrapMode: Text.Wrap
+                        Accessible.name: text
+                    }
+
+                    Text {
+                        Layout.fillWidth: true
+                        text: shell.taskActionKind === "comment" ? "Comment (required)" : "Comment (optional)"
+                        color: shell.actionText
+                        font.pixelSize: 10
+                        font.weight: Font.Medium
+                    }
+
+                    TextArea {
+                        id: taskActionText
+                        Layout.fillWidth: true
+                        Layout.preferredHeight: 96
+                        enabled: !shell.taskActionBusy
+                        placeholderText: shell.taskActionKind === "comment"
+                            ? "Write a comment…"
+                            : "Add context for closing this task…"
+                        wrapMode: TextEdit.Wrap
+                        color: shell.actionText
+                        placeholderTextColor: shell.actionMutedText
+                        selectionColor: shell.actionAccent
+                        selectedTextColor: shell.actionText
+                        font.pixelSize: 11
+                        leftPadding: shell.space3
+                        rightPadding: shell.space3
+                        topPadding: shell.space2
+                        bottomPadding: shell.space2
+                        Accessible.name: shell.taskActionKind === "comment"
+                            ? "Required comment"
+                            : "Optional close comment"
+                        Accessible.description: "Press Control Enter to submit"
+
+                        onTextChanged: {
+                            if (!shell.taskActionBusy
+                                    && shell.taskActionError === "Enter a comment before submitting."
+                                    && text.trim() !== "")
+                                shell.taskActionError = "";
+                        }
+
+                        Keys.onPressed: event => {
+                            if ((event.modifiers & Qt.ControlModifier)
+                                    && (event.key === Qt.Key_Return || event.key === Qt.Key_Enter)) {
+                                shell.submitTaskAction();
+                                event.accepted = true;
+                            }
+                        }
+
+                        background: Rectangle {
+                            color: shell.actionSurfaceRaised
+                            radius: shell.controlRadius
+                            border.width: 1
+                            border.color: taskActionText.activeFocus ? shell.actionAccent : shell.actionBorder
+                        }
+                    }
+
+                    Rectangle {
+                        visible: shell.taskActionError !== ""
+                        Layout.fillWidth: true
+                        implicitHeight: actionErrorLabel.implicitHeight + shell.space4
+                        color: shell.actionErrorSurface
+                        radius: shell.controlRadius
+                        border.width: 1
+                        border.color: shell.actionErrorBorder
+
+                        Text {
+                            id: actionErrorLabel
+                            anchors.fill: parent
+                            anchors.margins: shell.space2
+                            text: shell.taskActionError
+                            color: shell.actionErrorText
+                            font.pixelSize: 10
+                            wrapMode: Text.Wrap
+                            Accessible.name: "Task action error: " + text
+                        }
+                    }
+
+                    RowLayout {
+                        Layout.fillWidth: true
+                        spacing: shell.space2
+
+                        BusyIndicator {
+                            Layout.preferredWidth: 24
+                            Layout.preferredHeight: 24
+                            visible: shell.taskActionBusy
+                            running: shell.taskActionBusy
+                            Accessible.name: "Submitting task action"
+                        }
+
+                        Item {
+                            Layout.fillWidth: true
+                        }
+
+                        Button {
+                            id: cancelTaskActionButton
+                            Layout.preferredWidth: 72
+                            Layout.preferredHeight: 32
+                            enabled: !shell.taskActionBusy
+                            text: "Cancel"
+                            flat: true
+                            Accessible.name: "Cancel task action"
+                            onClicked: taskActionDialog.close()
+
+                            contentItem: Text {
+                                text: cancelTaskActionButton.text
+                                color: cancelTaskActionButton.enabled ? shell.actionMutedText : shell.actionBorder
+                                font.pixelSize: 11
+                                horizontalAlignment: Text.AlignHCenter
+                                verticalAlignment: Text.AlignVCenter
+                            }
+
+                            background: Rectangle {
+                                radius: shell.controlRadius
+                                color: cancelTaskActionButton.hovered || cancelTaskActionButton.activeFocus
+                                    ? shell.actionSurfaceRaised : "transparent"
+                                border.width: cancelTaskActionButton.activeFocus ? 1 : 0
+                                border.color: shell.actionAccent
+                            }
+                        }
+
+                        Button {
+                            id: submitTaskActionButton
+                            Layout.preferredWidth: 104
+                            Layout.preferredHeight: 32
+                            enabled: !shell.taskActionBusy
+                            text: shell.taskActionBusy
+                                ? (shell.taskActionKind === "comment" ? "Adding…" : "Closing…")
+                                : (shell.taskActionKind === "comment" ? "Add comment" : "Close task")
+                            flat: true
+                            Accessible.name: text
+                            Accessible.description: shell.taskActionKind === "comment"
+                                ? "Submit the required comment"
+                                : "Confirm close with audit evidence"
+                            onClicked: shell.submitTaskAction()
+
+                            contentItem: Text {
+                                text: submitTaskActionButton.text
+                                color: shell.actionText
+                                font.pixelSize: 11
+                                font.weight: Font.Medium
+                                horizontalAlignment: Text.AlignHCenter
+                                verticalAlignment: Text.AlignVCenter
+                            }
+
+                            background: Rectangle {
+                                radius: shell.controlRadius
+                                color: shell.taskActionKind === "close"
+                                    ? (submitTaskActionButton.hovered ? shell.actionDanger : shell.actionErrorBorder)
+                                    : (submitTaskActionButton.hovered ? shell.actionAccent : shell.actionAccentMuted)
+                                border.width: submitTaskActionButton.activeFocus ? 2 : 0
+                                border.color: shell.actionText
+                                opacity: submitTaskActionButton.enabled ? 1 : 0.55
                             }
                         }
                     }

@@ -40,7 +40,8 @@ Task commands resolve their project in this order:
 1. the global `--project <id>` flag;
 2. `FACETS_PROJECT`;
 3. the nearest `.kata.toml` found in the current directory or a parent;
-4. the directory name of the nearest Jujutsu workspace (`.jj`).
+4. the most specific configured project `directory` containing the current directory;
+5. the directory name of the nearest Jujutsu workspace (`.jj`).
 
 A Kata workspace config names its project like this:
 
@@ -99,15 +100,19 @@ facets tasks edit T-123 --body "" --assignee ""
 
 Priorities range from `0` to `4`; `-` clears an existing priority. Empty `--body` and `--assignee` values clear those fields.
 
-Close a task with a completion message and at least one typed evidence value, or reopen it:
+Close a task with a completion message and at least one typed evidence value. An optional comment can be appended in the same non-interactive command:
 
 ```sh
 facets tasks close T-123 \
   --message "Implemented and verified" \
   --evidence "test:go test ./..." \
-  --evidence "commit:<sha>"
+  --evidence "commit:<sha>" \
+  --comment "Released through the desktop flow"
+facets tasks comment T-123 --body "Follow-up implementation context"
 facets tasks reopen T-123
 ```
+
+Append further context with `tasks comment`, or reopen the task with `tasks reopen`. All mutations are non-interactive.
 
 Delete without an interactive prompt by repeating the exact task ID as confirmation:
 
@@ -120,6 +125,7 @@ Every task subcommand supports `--help`, for example:
 ```sh
 facets tasks create --help
 facets tasks close --help
+facets tasks comment --help
 ```
 
 ### Task snapshot daemon

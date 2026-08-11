@@ -43,6 +43,11 @@ func (f fakeProvider) CreateTask(context.Context, string, project.TaskInput) (pr
 func (f fakeProvider) UpdateTask(context.Context, string, string, project.TaskPatch) (project.Task, error) {
 	return project.Task{}, errors.New("unused")
 }
+
+func (f fakeProvider) CommentTask(context.Context, string, string, string) (project.Task, error) {
+	return project.Task{}, errors.New("unused")
+}
+
 func (f fakeProvider) DeleteTask(context.Context, string, string) error { return errors.New("unused") }
 
 type fakeActivity struct {

@@ -75,10 +75,12 @@ type TaskInput struct {
 	Metadata       map[string]any
 }
 
-// Completion supplies the audit context needed to close a task.
+// Completion supplies the audit context needed to close a task. Comment, when
+// non-empty, appends provider-native commentary as part of the close mutation.
 type Completion struct {
 	Message  string
 	Evidence []string
+	Comment  string
 }
 
 // PriorityPatch distinguishes an unchanged priority from setting or clearing it.
@@ -99,7 +101,7 @@ type TaskPatch struct {
 	Metadata    map[string]any
 }
 
-// Provider supplies project and task CRUD for one external system.
+// Provider supplies project and task CRUD plus task comments for one external system.
 // Delete operations may archive when the external system supports recovery.
 type Provider interface {
 	Name() string
@@ -114,5 +116,6 @@ type Provider interface {
 	GetTask(ctx context.Context, projectID, id string) (Task, error)
 	CreateTask(ctx context.Context, projectID string, input TaskInput) (Task, error)
 	UpdateTask(ctx context.Context, projectID, id string, patch TaskPatch) (Task, error)
+	CommentTask(ctx context.Context, projectID, id, body string) (Task, error)
 	DeleteTask(ctx context.Context, projectID, id string) error
 }

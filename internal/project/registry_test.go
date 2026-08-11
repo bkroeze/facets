@@ -100,4 +100,8 @@ func (stubProvider) UpdateTask(context.Context, string, string, TaskPatch) (Task
 	return Task{}, ErrUnsupported
 }
 
+func (stubProvider) CommentTask(context.Context, string, string, string) (Task, error) {
+	return Task{}, ErrUnsupported
+}
+
 func (stubProvider) DeleteTask(context.Context, string, string) error { return ErrUnsupported }

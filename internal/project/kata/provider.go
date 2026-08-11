@@ -262,6 +262,13 @@ func (p *Provider) UpdateTask(ctx context.Context, projectID, id string, patch p
 				}
 				statusArgs = append(statusArgs, "--evidence", evidence)
 			}
+			if patch.Completion.Comment != "" {
+				comment, err := required("completion comment", patch.Completion.Comment)
+				if err != nil {
+					return project.Task{}, err
+				}
+				statusArgs = append(statusArgs, "--comment", comment)
+			}
 		}
 	}
 
@@ -308,6 +315,25 @@ func (p *Provider) UpdateTask(ctx context.Context, projectID, id string, patch p
 		return mapIssue(response.Issue, projectID)
 	}
 	if err := p.runJSON(ctx, statusArgs, &response); err != nil {
+		return project.Task{}, err
+	}
+	return mapIssue(response.Issue, projectID)
+}
+func (p *Provider) CommentTask(ctx context.Context, projectID, id, body string) (project.Task, error) {
+	projectID, err := required("project ID", projectID)
+	if err != nil {
+		return project.Task{}, err
+	}
+	id, err = required("task ID", id)
+	if err != nil {
+		return project.Task{}, err
+	}
+	body, err = required("comment body", body)
+	if err != nil {
+		return project.Task{}, err
+	}
+	var response issueResponse
+	if err := p.runJSON(ctx, []string{"comment", id, "--project", projectID, "--body", body}, &response); err != nil {
 		return project.Task{}, err
 	}
 	return mapIssue(response.Issue, projectID)

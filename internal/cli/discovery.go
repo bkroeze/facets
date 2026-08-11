@@ -9,9 +9,11 @@ import (
 	"strings"
 
 	"github.com/BurntSushi/toml"
+
+	"facets.barnlab.dev/internal/store"
 )
 
-func discoverProject(cwd, explicit string, getenv func(string) string) (string, error) {
+func discoverProject(cwd, explicit string, getenv func(string) string, mapped func(string) (string, bool, error)) (string, error) {
 	if strings.TrimSpace(explicit) != "" {
 		return strings.TrimSpace(explicit), nil
 	}
@@ -45,6 +47,15 @@ func discoverProject(cwd, explicit string, getenv func(string) string) (string, 
 			break
 		}
 	}
+	if mapped != nil {
+		name, present, mappingErr := mapped(cwd)
+		if mappingErr != nil {
+			return "", mappingErr
+		}
+		if present {
+			return name, nil
+		}
+	}
 	for directory := cwd; ; directory = filepath.Dir(directory) {
 		path := filepath.Join(directory, ".jj")
 		info, statErr := os.Stat(path)
@@ -67,6 +78,43 @@ func discoverProject(cwd, explicit string, getenv func(string) string) (string, 
 		}
 	}
 	return "", errProjectNotDiscovered
+}
+
+func mappedProject(cwd string, projects []store.RegisteredProject) (string, bool, error) {
+	cwd, err := filepath.Abs(cwd)
+	if err != nil {
+		return "", false, fmt.Errorf("resolve current directory: %w", err)
+	}
+	cwd = filepath.Clean(cwd)
+
+	var (
+		selectedID   string
+		selectedRoot string
+	)
+	for _, registered := range projects {
+		directory, ok := registered.Metadata["directory"].(string)
+		directory = strings.TrimSpace(directory)
+		if !ok || directory == "" || !filepath.IsAbs(directory) {
+			continue
+		}
+		root := filepath.Clean(directory)
+		relative, relErr := filepath.Rel(root, cwd)
+		if relErr != nil {
+			return "", false, fmt.Errorf("compare project directory %s with %s: %w", root, cwd, relErr)
+		}
+		if relative != "." && (relative == ".." || strings.HasPrefix(relative, ".."+string(filepath.Separator))) {
+			continue
+		}
+		if len(root) < len(selectedRoot) {
+			continue
+		}
+		if len(root) == len(selectedRoot) && selectedID != "" && registered.ID != selectedID {
+			return "", false, fmt.Errorf("project directory %s is mapped to both %q and %q", root, selectedID, registered.ID)
+		}
+		selectedID = registered.ID
+		selectedRoot = root
+	}
+	return selectedID, selectedID != "", nil
 }
 
 func kataProjectName(path string) (string, bool, error) {

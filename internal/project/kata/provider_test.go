@@ -318,6 +318,38 @@ func TestUpdateTaskEditsBeforeStatusTransition(t *testing.T) {
 	runner.done()
 }
 
+func TestUpdateTaskClosePassesOptionalComment(t *testing.T) {
+	closed := project.StatusClosed
+	closedIssue := strings.Replace(openIssue, `"status": "open"`, `"status": "closed"`, 1)
+	runner := &scriptedRunner{t: t, steps: []scriptStep{
+		step([]string{"close", "op21", "--project", "alpha", "--reason", "done", "--message", "verified", "--evidence", "test:focused", "--comment", "Released to users"}, issueEnvelope(closedIssue)),
+	}}
+	provider := New(Config{Binary: "/test/kata", Actor: "robot", Runner: runner})
+	result, err := provider.UpdateTask(context.Background(), "alpha", "op21", project.TaskPatch{
+		Status: &closed,
+		Completion: &project.Completion{
+			Message: "verified", Evidence: []string{"test:focused"}, Comment: "Released to users",
+		},
+	})
+	if err != nil || result.Status != project.StatusClosed {
+		t.Fatalf("UpdateTask close with comment = %#v, %v", result, err)
+	}
+	runner.done()
+}
+
+func TestCommentTaskCommandAndMapping(t *testing.T) {
+	runner := &scriptedRunner{t: t, steps: []scriptStep{
+		step([]string{"comment", "op21", "--project", "alpha", "--body", "Follow-up context"}, issueEnvelope(openIssue)),
+	}}
+	provider := New(Config{Binary: "/test/kata", Actor: "robot", Runner: runner})
+	commented, err := provider.CommentTask(context.Background(), "alpha", "op21", "Follow-up context")
+	if err != nil {
+		t.Fatalf("CommentTask: %v", err)
+	}
+	assertMappedTask(t, commented)
+	runner.done()
+}
+
 func TestDefaultBinaryAndOptionalActor(t *testing.T) {
 	runner := &scriptedRunner{t: t, steps: []scriptStep{{
 		binary: "kata",
@@ -623,6 +655,10 @@ func TestValidationRejectsInvalidInputBeforeCommands(t *testing.T) {
 			_, err := p.UpdateTask(context.Background(), "alpha", "op21", project.TaskPatch{Status: &closed, Completion: &project.Completion{Message: "done", Evidence: []string{" "}}})
 			return err
 		}},
+		{"close with empty comment", func(p *Provider) error {
+			_, err := p.UpdateTask(context.Background(), "alpha", "op21", project.TaskPatch{Status: &closed, Completion: &project.Completion{Message: "done", Evidence: []string{"test:x"}, Comment: " "}})
+			return err
+		}},
 		{"update task metadata", func(p *Provider) error {
 			_, err := p.UpdateTask(context.Background(), "alpha", "op21", project.TaskPatch{Metadata: map[string]any{"key": "value"}})
 			return err
@@ -632,6 +668,18 @@ func TestValidationRejectsInvalidInputBeforeCommands(t *testing.T) {
 			if !errors.Is(err, project.ErrUnsupported) {
 				return errors.New("expected ErrUnsupported")
 			}
+			return err
+		}},
+		{"comment task project ID", func(p *Provider) error {
+			_, err := p.CommentTask(context.Background(), "", "op21", "context")
+			return err
+		}},
+		{"comment task ID", func(p *Provider) error {
+			_, err := p.CommentTask(context.Background(), "alpha", " ", "context")
+			return err
+		}},
+		{"comment task body", func(p *Provider) error {
+			_, err := p.CommentTask(context.Background(), "alpha", "op21", " ")
 			return err
 		}},
 		{"delete task project ID", func(p *Provider) error { return p.DeleteTask(context.Background(), "", "op21") }},

@@ -310,6 +310,37 @@ func (s *Store) SyncProjects(ctx context.Context, source string, items []project
 	return nil
 }
 
+// RegisteredProjects returns every provider project for source in stable ID order.
+func (s *Store) RegisteredProjects(ctx context.Context, source string) ([]RegisteredProject, error) {
+	source = strings.TrimSpace(source)
+	if source == "" {
+		return nil, errors.New("store: project source is required")
+	}
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT source, project_id, name, metadata, first_seen, last_seen
+		FROM project_registry
+		WHERE source = ?
+		ORDER BY project_id
+	`, source)
+	if err != nil {
+		return nil, fmt.Errorf("store: list registered projects: %w", err)
+	}
+	defer rows.Close()
+
+	projects := make([]RegisteredProject, 0)
+	for rows.Next() {
+		registered, err := scanRegisteredProject(rows)
+		if err != nil {
+			return nil, err
+		}
+		projects = append(projects, registered)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("store: list registered projects: %w", err)
+	}
+	return projects, nil
+}
+
 // RegisteredProject returns a provider project from the local registry.
 func (s *Store) RegisteredProject(ctx context.Context, source, id string) (RegisteredProject, error) {
 	source = strings.TrimSpace(source)

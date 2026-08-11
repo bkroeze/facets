@@ -145,7 +145,7 @@ func (a *App) runHome(ctx context.Context, stdout, stderr io.Writer, cfg runConf
 	if code != 0 {
 		return code
 	}
-	projectID, code := a.projectID(stdout, stderr, cfg)
+	projectID, code := a.projectID(ctx, stdout, stderr, cfg, provider.Name())
 	if code != 0 {
 		return code
 	}
@@ -187,7 +187,7 @@ func (a *App) runTasks(ctx context.Context, stdout, stderr io.Writer, cfg runCon
 	command := "list"
 	if len(args) > 0 {
 		switch args[0] {
-		case "list", "show", "create", "edit", "close", "reopen", "delete", "daemon":
+		case "list", "show", "create", "edit", "close", "comment", "reopen", "delete", "daemon":
 			command = args[0]
 			args = args[1:]
 		default:
@@ -209,6 +209,8 @@ func (a *App) runTasks(ctx context.Context, stdout, stderr io.Writer, cfg runCon
 			a.write(stdout, cfg.format, taskEditHelp())
 		case "close":
 			a.write(stdout, cfg.format, taskCloseHelp())
+		case "comment":
+			a.write(stdout, cfg.format, taskCommentHelp())
 		case "reopen":
 			a.write(stdout, cfg.format, taskReopenHelp())
 		case "delete":
@@ -229,6 +231,8 @@ func (a *App) runTasks(ctx context.Context, stdout, stderr io.Writer, cfg runCon
 		return a.editTask(ctx, stdout, stderr, cfg, args)
 	case "close":
 		return a.closeTask(ctx, stdout, stderr, cfg, args)
+	case "comment":
+		return a.commentTask(ctx, stdout, stderr, cfg, args)
 	case "reopen":
 		return a.reopenTask(ctx, stdout, stderr, cfg, args)
 	case "daemon":
@@ -266,7 +270,7 @@ func (a *App) listTasks(ctx context.Context, stdout, stderr io.Writer, cfg runCo
 		a.usageError(stdout, cfg.format, err.Error(), fmt.Sprintf("Use `%s --fields id,title,status` or choose from priority,assignee,updated", usageCommand))
 		return 2
 	}
-	provider, projectID, taskCommand, code := a.taskDependencies(stdout, stderr, cfg)
+	provider, projectID, taskCommand, code := a.taskDependencies(ctx, stdout, stderr, cfg)
 	if code != 0 {
 		return code
 	}
@@ -299,7 +303,7 @@ func (a *App) showTask(ctx context.Context, stdout, stderr io.Writer, cfg runCon
 	if code := a.parseFlags(stdout, cfg.format, fs, args[1:], taskShowHelp()); code >= 0 {
 		return code
 	}
-	provider, projectID, taskCommand, code := a.taskDependencies(stdout, stderr, cfg)
+	provider, projectID, taskCommand, code := a.taskDependencies(ctx, stdout, stderr, cfg)
 	if code != 0 {
 		return code
 	}
@@ -332,7 +336,7 @@ func (a *App) createTask(ctx context.Context, stdout, stderr io.Writer, cfg runC
 		a.usageError(stdout, cfg.format, priority.err.Error(), fmt.Sprintf("Use `%s \"<title>\" --priority 0` through `--priority 4`", usageCommand))
 		return 2
 	}
-	provider, projectID, taskCommand, code := a.taskDependencies(stdout, stderr, cfg)
+	provider, projectID, taskCommand, code := a.taskDependencies(ctx, stdout, stderr, cfg)
 	if code != 0 {
 		return code
 	}
@@ -383,7 +387,7 @@ func (a *App) editTask(ctx context.Context, stdout, stderr io.Writer, cfg runCon
 	if assignee.set {
 		patch.Assignee = &assignee.value
 	}
-	provider, projectID, taskCommand, code := a.taskDependencies(stdout, stderr, cfg)
+	provider, projectID, taskCommand, code := a.taskDependencies(ctx, stdout, stderr, cfg)
 	if code != 0 {
 		return code
 	}
@@ -404,8 +408,10 @@ func (a *App) closeTask(ctx context.Context, stdout, stderr io.Writer, cfg runCo
 	id := args[0]
 	fs := commandFlags(usageCommand)
 	var message string
+	var comment optionalString
 	var evidence stringList
 	fs.StringVar(&message, "message", "", "completion message (required)")
+	fs.Var(&comment, "comment", "optional comment appended while closing")
 	fs.Var(&evidence, "evidence", "typed completion evidence such as test:<command>, commit:<sha>, or pr:<url> (required, repeatable)")
 	if code := a.parseFlags(stdout, cfg.format, fs, args[1:], taskCloseHelp()); code >= 0 {
 		return code
@@ -424,15 +430,48 @@ func (a *App) closeTask(ctx context.Context, stdout, stderr io.Writer, cfg runCo
 			return 2
 		}
 	}
+	if comment.set && strings.TrimSpace(comment.value) == "" {
+		a.usageError(stdout, cfg.format, "--comment must not be empty", fmt.Sprintf("Provide `%s <id> --message \"done\" --evidence \"test:focused\" --comment \"<text>\"`, or omit --comment", usageCommand))
+		return 2
+	}
 	closed := project.StatusClosed
-	patch := project.TaskPatch{Status: &closed, Completion: &project.Completion{Message: strings.TrimSpace(message), Evidence: []string(evidence)}}
-	provider, projectID, taskCommand, code := a.taskDependencies(stdout, stderr, cfg)
+	patch := project.TaskPatch{Status: &closed, Completion: &project.Completion{Message: strings.TrimSpace(message), Evidence: []string(evidence), Comment: strings.TrimSpace(comment.value)}}
+	provider, projectID, taskCommand, code := a.taskDependencies(ctx, stdout, stderr, cfg)
 	if code != 0 {
 		return code
 	}
 	updated, err := provider.UpdateTask(ctx, projectID, id, patch)
 	if err != nil {
 		return a.providerError(stdout, stderr, cfg.format, fmt.Sprintf("could not close task %q", id), err, fmt.Sprintf("Review completion values with `%s close %s --help`", taskCommand, shellQuote(id)))
+	}
+	a.write(stdout, cfg.format, taskDocument(updated, true, taskCommand))
+	return 0
+}
+
+func (a *App) commentTask(ctx context.Context, stdout, stderr io.Writer, cfg runConfig, args []string) int {
+	usageCommand := a.taskUsageCommand(cfg) + " comment"
+	if missingRequiredArg(args) {
+		a.usageError(stdout, cfg.format, "task ID is required", fmt.Sprintf("Run `%s <id> --body \"<text>\"`", usageCommand))
+		return 2
+	}
+	id := strings.TrimSpace(args[0])
+	fs := commandFlags(usageCommand)
+	var body optionalString
+	fs.Var(&body, "body", "comment body (required)")
+	if code := a.parseFlags(stdout, cfg.format, fs, args[1:], taskCommentHelp()); code >= 0 {
+		return code
+	}
+	if !body.set || strings.TrimSpace(body.value) == "" {
+		a.usageError(stdout, cfg.format, "--body is required and must not be empty", fmt.Sprintf("Provide `%s %s --body \"<text>\"`", usageCommand, shellQuote(id)))
+		return 2
+	}
+	provider, projectID, taskCommand, code := a.taskDependencies(ctx, stdout, stderr, cfg)
+	if code != 0 {
+		return code
+	}
+	updated, err := provider.CommentTask(ctx, projectID, id, strings.TrimSpace(body.value))
+	if err != nil {
+		return a.providerError(stdout, stderr, cfg.format, fmt.Sprintf("could not comment on task %q", id), err, fmt.Sprintf("Review the task and comment with `%s comment %s --help`", taskCommand, shellQuote(id)))
 	}
 	a.write(stdout, cfg.format, taskDocument(updated, true, taskCommand))
 	return 0
@@ -452,7 +491,7 @@ func (a *App) reopenTask(ctx context.Context, stdout, stderr io.Writer, cfg runC
 		a.usageError(stdout, cfg.format, "tasks reopen accepts only a task ID", fmt.Sprintf("Run `%s <id>`", usageCommand))
 		return 2
 	}
-	provider, projectID, taskCommand, code := a.taskDependencies(stdout, stderr, cfg)
+	provider, projectID, taskCommand, code := a.taskDependencies(ctx, stdout, stderr, cfg)
 	if code != 0 {
 		return code
 	}
@@ -482,7 +521,7 @@ func (a *App) deleteTask(ctx context.Context, stdout, stderr io.Writer, cfg runC
 		a.usageError(stdout, cfg.format, "--confirm must exactly match the task ID", fmt.Sprintf("Run `%s %s --confirm %s`", usageCommand, shellQuote(id), shellQuote(id)))
 		return 2
 	}
-	provider, projectID, taskCommand, code := a.taskDependencies(stdout, stderr, cfg)
+	provider, projectID, taskCommand, code := a.taskDependencies(ctx, stdout, stderr, cfg)
 	if code != 0 {
 		return code
 	}
@@ -763,20 +802,30 @@ func (a *App) selectProvider(stdout io.Writer, cfg runConfig) (project.Provider,
 	return nil, 2
 }
 
-func (a *App) taskDependencies(stdout, stderr io.Writer, cfg runConfig) (project.Provider, string, string, int) {
+func (a *App) taskDependencies(ctx context.Context, stdout, stderr io.Writer, cfg runConfig) (project.Provider, string, string, int) {
 	provider, code := a.selectProvider(stdout, cfg)
 	if code != 0 {
 		return nil, "", "", code
 	}
-	projectID, code := a.projectID(stdout, stderr, cfg)
+	projectID, code := a.projectID(ctx, stdout, stderr, cfg, provider.Name())
 	if code != 0 {
 		return nil, "", "", code
 	}
 	return provider, projectID, selectedTaskCommand(cfg, projectID), 0
 }
 
-func (a *App) projectID(stdout, stderr io.Writer, cfg runConfig) (string, int) {
-	id, err := discoverProject(a.Cwd, cfg.project, a.getenv)
+func (a *App) projectID(ctx context.Context, stdout, stderr io.Writer, cfg runConfig, source string) (string, int) {
+	var mapped func(string) (string, bool, error)
+	if a.ProjectStore != nil {
+		mapped = func(cwd string) (string, bool, error) {
+			registered, err := a.ProjectStore.RegisteredProjects(ctx, source)
+			if err != nil {
+				return "", false, err
+			}
+			return mappedProject(cwd, registered)
+		}
+	}
+	id, err := discoverProject(a.Cwd, cfg.project, a.getenv, mapped)
 	if err == nil {
 		return id, 0
 	}

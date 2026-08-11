@@ -17,19 +17,22 @@ import (
 )
 
 type fakeProvider struct {
-	name             string
-	projects         []project.Project
-	tasks            []project.Task
-	err              error
-	listProjectID    string
-	listFilter       project.TaskFilter
-	createdProjectID string
-	created          project.TaskInput
-	updatedProjectID string
-	updatedID        string
-	patch            project.TaskPatch
-	deletedProjectID string
-	deletedID        string
+	name               string
+	projects           []project.Project
+	tasks              []project.Task
+	err                error
+	listProjectID      string
+	listFilter         project.TaskFilter
+	createdProjectID   string
+	created            project.TaskInput
+	updatedProjectID   string
+	updatedID          string
+	patch              project.TaskPatch
+	commentedProjectID string
+	commentedID        string
+	commentBody        string
+	deletedProjectID   string
+	deletedID          string
 }
 
 func (f *fakeProvider) Name() string {
@@ -91,6 +94,13 @@ func (f *fakeProvider) UpdateTask(_ context.Context, projectID, id string, patch
 		status = *patch.Status
 	}
 	return project.Task{ID: id, ProjectID: projectID, Title: "updated", Status: status}, nil
+}
+func (f *fakeProvider) CommentTask(_ context.Context, projectID, id, body string) (project.Task, error) {
+	f.commentedProjectID, f.commentedID, f.commentBody = projectID, id, body
+	if f.err != nil {
+		return project.Task{}, f.err
+	}
+	return project.Task{ID: id, ProjectID: projectID, Title: "updated", Status: project.StatusOpen}, nil
 }
 func (f *fakeProvider) DeleteTask(_ context.Context, projectID, id string) error {
 	f.deletedProjectID, f.deletedID = projectID, id
@@ -318,7 +328,7 @@ func TestTaskMutationsBuildProviderNeutralInputs(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("close code=%d: %s", code, stdout)
 	}
-	if provider.patch.Status == nil || *provider.patch.Status != project.StatusClosed || provider.patch.Completion == nil || provider.patch.Completion.Message != "Done" || len(provider.patch.Completion.Evidence) != 2 || provider.patch.Completion.Evidence[0] != "test:go test ./..." || provider.patch.Completion.Evidence[1] != "pr:https://example.test/pull/42" {
+	if provider.patch.Status == nil || *provider.patch.Status != project.StatusClosed || provider.patch.Completion == nil || provider.patch.Completion.Message != "Done" || len(provider.patch.Completion.Evidence) != 2 || provider.patch.Completion.Evidence[0] != "test:go test ./..." || provider.patch.Completion.Evidence[1] != "pr:https://example.test/pull/42" || provider.patch.Completion.Comment != "" {
 		t.Fatalf("close patch = %#v", provider.patch)
 	}
 
@@ -337,6 +347,55 @@ func TestTaskMutationsBuildProviderNeutralInputs(t *testing.T) {
 	}
 }
 
+func TestTaskCloseCarriesOptionalComment(t *testing.T) {
+	provider := &fakeProvider{}
+	code, stdout, stderr := runCLI(provider, "", nil, "--project", "demo", "tasks", "close", "T-1", "--message", "Done", "--evidence", "test:focused", "--comment", "Released to users")
+	if code != 0 || stderr != "" || provider.patch.Completion == nil || provider.patch.Completion.Comment != "Released to users" {
+		t.Fatalf("close comment code=%d patch=%#v stdout=%s stderr=%s", code, provider.patch, stdout, stderr)
+	}
+}
+
+func TestTaskCommentTOONJSONAndProviderErrors(t *testing.T) {
+	provider := &fakeProvider{}
+	code, stdout, stderr := runCLI(provider, "", nil, "--project", "demo", "tasks", "comment", "T-1", "--body", "Follow-up context")
+	if code != 0 || stderr != "" || !strings.Contains(stdout, "task:") || provider.commentedProjectID != "demo" || provider.commentedID != "T-1" || provider.commentBody != "Follow-up context" {
+		t.Fatalf("TOON comment code=%d project=%q id=%q body=%q stdout=%s stderr=%s", code, provider.commentedProjectID, provider.commentedID, provider.commentBody, stdout, stderr)
+	}
+
+	code, stdout, stderr = runCLI(provider, "", nil, "--project", "demo", "--json", "tasks", "comment", "T-2", "--body", "JSON context")
+	var decoded struct {
+		Task struct {
+			ID string `json:"id"`
+		} `json:"task"`
+	}
+	if err := json.Unmarshal([]byte(stdout), &decoded); err != nil {
+		t.Fatalf("invalid comment JSON: %v\n%s", err, stdout)
+	}
+	if code != 0 || stderr != "" || decoded.Task.ID != "T-2" {
+		t.Fatalf("JSON comment code=%d decoded=%#v stdout=%s stderr=%s", code, decoded, stdout, stderr)
+	}
+
+	provider.err = errors.New("kata: raw subprocess secret")
+	code, stdout, stderr = runCLI(provider, "", nil, "--project", "demo", "tasks", "comment", "T-1", "--body", "context")
+	if code != 1 || stderr != "" || !strings.Contains(stdout, "type: \"operational\"") || !strings.Contains(stdout, "could not comment on task") || strings.Contains(stdout, "kata") || strings.Contains(stdout, "subprocess") {
+		t.Fatalf("comment error code=%d stdout=%s stderr=%s", code, stdout, stderr)
+	}
+
+	code, stdout, stderr = runCLI(provider, "", nil, "--project", "demo", "--json", "tasks", "comment", "T-1", "--body", "context")
+	var failure struct {
+		Error struct {
+			Type    string `json:"type"`
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal([]byte(stdout), &failure); err != nil {
+		t.Fatalf("invalid comment error JSON: %v\n%s", err, stdout)
+	}
+	if code != 1 || stderr != "" || failure.Error.Type != "operational" || !strings.Contains(failure.Error.Message, "could not comment on task") || strings.Contains(stdout, "kata") || strings.Contains(stdout, "subprocess") {
+		t.Fatalf("JSON comment error code=%d failure=%#v stdout=%s stderr=%s", code, failure, stdout, stderr)
+	}
+}
+
 func TestMutationValidationDoesNotCallProvider(t *testing.T) {
 	provider := &fakeProvider{}
 	cases := [][]string{
@@ -344,15 +403,19 @@ func TestMutationValidationDoesNotCallProvider(t *testing.T) {
 		{"--project", "demo", "tasks", "edit", "T-1"},
 		{"--project", "demo", "tasks", "close", "T-1", "--evidence", "test:go test ./..."},
 		{"--project", "demo", "tasks", "close", "T-1", "--message", "done"},
+		{"--project", "demo", "tasks", "close", "T-1", "--message", "done", "--evidence", "test:focused", "--comment", " "},
+		{"--project", "demo", "tasks", "comment", "", "--body", "context"},
+		{"--project", "demo", "tasks", "comment", "T-1"},
+		{"--project", "demo", "tasks", "comment", "T-1", "--body", " "},
 		{"--project", "demo", "tasks", "delete", "T-1"},
 	}
 	for _, args := range cases {
-		provider.updatedID, provider.createdProjectID, provider.deletedID = "", "", ""
+		provider.updatedID, provider.createdProjectID, provider.deletedID, provider.commentedID = "", "", "", ""
 		code, stdout, _ := runCLI(provider, "", nil, args...)
 		if code != 2 || !strings.Contains(stdout, "type: \"usage\"") {
 			t.Errorf("args=%v code=%d: %s", args, code, stdout)
 		}
-		if provider.updatedID != "" || provider.createdProjectID != "" || provider.deletedID != "" {
+		if provider.updatedID != "" || provider.createdProjectID != "" || provider.deletedID != "" || provider.commentedID != "" {
 			t.Errorf("provider called for args %v", args)
 		}
 	}
@@ -366,6 +429,7 @@ func TestInvalidTaskInvocationsDoNotRequireProject(t *testing.T) {
 		{"tasks", "create", ""},
 		{"tasks", "edit", "T-1"},
 		{"tasks", "close", "T-1", "--message", "done"},
+		{"tasks", "comment", "T-1"},
 		{"tasks", "reopen", "T-1", "extra"},
 		{"tasks", "delete", "T-1"},
 	}
@@ -572,6 +636,18 @@ func TestHelpUsageOperationalErrorsAndChannels(t *testing.T) {
 	code, stdout, stderr = runCLI(provider, t.TempDir(), map[string]string{}, "tasks", "show", "--help")
 	if code != 0 || !strings.Contains(stdout, "facets tasks show <id> [--full]") || stderr != "" {
 		t.Fatalf("command help code=%d stdout=%s stderr=%s", code, stdout, stderr)
+	}
+	code, stdout, stderr = runCLI(provider, t.TempDir(), map[string]string{}, "tasks", "--help")
+	if code != 0 || !strings.Contains(stdout, "close") || !strings.Contains(stdout, "comment") || stderr != "" {
+		t.Fatalf("tasks help code=%d stdout=%s stderr=%s", code, stdout, stderr)
+	}
+	code, stdout, stderr = runCLI(provider, t.TempDir(), map[string]string{}, "tasks", "comment", "--help")
+	if code != 0 || !strings.Contains(stdout, "facets tasks comment <id> --body <text>") || stderr != "" {
+		t.Fatalf("comment help code=%d stdout=%s stderr=%s", code, stdout, stderr)
+	}
+	code, stdout, stderr = runCLI(provider, t.TempDir(), map[string]string{}, "tasks", "close", "--help")
+	if code != 0 || !strings.Contains(stdout, "--comment <text>") || stderr != "" {
+		t.Fatalf("close help code=%d stdout=%s stderr=%s", code, stdout, stderr)
 	}
 	code, stdout, stderr = runCLI(provider, "", nil, "--project", "demo", "tasks", "show")
 	if code != 2 || !strings.Contains(stdout, "type: \"usage\"") || stderr != "" {

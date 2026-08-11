@@ -17,12 +17,13 @@ func topHelp() object {
 
 func tasksHelp() object {
 	return helpDocument(
-		"facets tasks [list|show|create|edit|close|reopen|delete|daemon]",
+		"facets tasks [list|show|create|edit|close|comment|reopen|delete|daemon]",
 		"List defaults to open tasks when no task command is supplied",
 		table{columns: []string{"command", "required", "description"}, rows: [][]any{
 			{"list", "", "list tasks"}, {"show", "<id>", "show one task"},
 			{"create", "<title>", "create a task"}, {"edit", "<id> and an edit flag", "update task fields"},
 			{"close", "<id>, --message, --evidence <type:value>", "close with completion context"},
+			{"comment", "<id>, --body <text>", "append a task comment"},
 			{"reopen", "<id>", "reopen a task"}, {"delete", "<id>, --confirm <id>", "delete without prompting"},
 			{"daemon", "", "stream project and open-task snapshots as NDJSON"},
 		}},
@@ -77,11 +78,19 @@ func taskEditHelp() object {
 }
 
 func taskCloseHelp() object {
-	return helpDocument("facets tasks close <id> --message <text> --evidence <type:value> [--evidence <type:value>...]", "Close a task with required completion context",
+	return helpDocument("facets tasks close <id> --message <text> --evidence <type:value> [--evidence <type:value>...] [--comment <text>]", "Close a task with required completion context",
 		table{columns: []string{"name", "default", "description"}, rows: [][]any{
 			{"<id>", "required", "task ID"}, {"--message <text>", "required", "completion message"},
 			{"--evidence <type:value>", "required", "repeatable typed evidence: test:<command>, commit:<sha>, or pr:<url>"},
-		}}, primitiveArray{"facets tasks close T-123 --message \"Implemented\" --evidence \"test:go test ./...\"", "facets tasks close T-123 --message \"Shipped\" --evidence \"commit:<sha>\" --evidence \"pr:<url>\""}, nil)
+			{"--comment <text>", "empty", "optional comment appended while closing"},
+		}}, primitiveArray{"facets tasks close T-123 --message \"Implemented\" --evidence \"test:go test ./...\"", "facets tasks close T-123 --message \"Shipped\" --evidence \"commit:<sha>\" --evidence \"pr:<url>\" --comment \"Released to users\""}, nil)
+}
+
+func taskCommentHelp() object {
+	return helpDocument("facets tasks comment <id> --body <text>", "Append a comment to a task without prompting",
+		table{columns: []string{"name", "default", "description"}, rows: [][]any{
+			{"<id>", "required", "task ID"}, {"--body <text>", "required", "non-empty comment body"},
+		}}, primitiveArray{"facets tasks comment T-123 --body \"Implementation note\""}, nil)
 }
 
 func taskReopenHelp() object {

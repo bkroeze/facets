@@ -265,6 +265,11 @@ func (f *fakeProjectProvider) UpdateTask(_ context.Context, _ string, _ string, 
 	f.patch = patch
 	return f.task, nil
 }
+
+func (f *fakeProjectProvider) CommentTask(context.Context, string, string, string) (project.Task, error) {
+	return project.Task{}, project.ErrUnsupported
+}
+
 func (f *fakeProjectProvider) DeleteTask(context.Context, string, string) error {
 	return project.ErrUnsupported
 }
