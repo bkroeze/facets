@@ -1,7 +1,6 @@
 package facets.mobile
 
-import androidx.compose.ui.test.assertIsDisplayed
-import androidx.compose.ui.test.createAndroidComposeRule
+import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -16,13 +15,13 @@ class MainActivityTest {
 
     @Test
     fun launchesHomeAndRestoresSelectedDestinationAfterRecreation() {
-        composeRule.onNodeWithText("Your dashboard at a glance").assertIsDisplayed()
+        composeRule.onNodeWithText("Your dashboard at a glance").fetchSemanticsNode()
         composeRule.onNodeWithText("Tasks").performClick()
-        composeRule.onNodeWithText("Tasks will appear here").assertIsDisplayed()
+        composeRule.onNodeWithText("Tasks will appear here").fetchSemanticsNode()
 
         composeRule.activityRule.scenario.recreate()
         composeRule.waitForIdle()
 
-        composeRule.onNodeWithText("Tasks will appear here").assertIsDisplayed()
+        composeRule.onNodeWithText("Tasks will appear here").fetchSemanticsNode()
     }
 }

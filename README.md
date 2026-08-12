@@ -421,6 +421,10 @@ selected contract version and uses a stable JSON error envelope for every path
 under `/api/v1`. See [`docs/api-v1.md`](docs/api-v1.md) for resource shapes,
 lifecycle requests, ordering, nullability, and error codes.
 
+For the reproducible loopback-only deployment with Tailscale Serve HTTPS and
+MagicDNS, see [`docs/tailnet.md`](docs/tailnet.md). The deployment keeps local
+`facets serve` usage available; it only adds an optional user service.
+
 ## Output and errors
 
 Command results are written to stdout as [TOON](https://toonformat.dev/) by default. Use `--json` when another program needs JSON:
@@ -458,12 +462,16 @@ separate from the Go CLI, web dashboard, and Quickshell widget.
 - Android SDK Platform 36 and build tools installed through Android Studio or
   the Android SDK manager;
 - JDK 17;
-- an emulator or physical device is only required for instrumentation tests.
+- an emulator or physical device for connected tests and release smoke tests;
+- the device enrolled in the same Tailnet as the Facets workstation.
 
 The app compiles and targets API 36 and supports Android API 26 and newer. No
-machine-local SDK path or signing secret belongs in this repository. The
-text-only `android/gradlew` launcher uses an installed Gradle when available,
-or downloads the pinned distribution when it is missing.
+machine-local SDK path, signing key, Tailnet secret, private hostname, or test
+data belongs in this repository. The text-only `android/gradlew` launcher uses
+an installed Gradle when available, or downloads the pinned distribution when
+it is missing.
+
+### Build and install
 
 Run the deterministic debug build, lint, and JVM tests from the checkout:
 
@@ -472,15 +480,80 @@ cd android
 ./gradlew :app:assembleDebug :app:lintDebug test
 ```
 
-To run the Compose instrumentation smoke test on an available device:
+Build the non-minified release artifact separately:
+
+```sh
+cd android
+./gradlew :app:assembleRelease
+```
+
+With an enrolled device or emulator attached, install either artifact:
+
+```sh
+adb install -r app/build/outputs/apk/debug/app-debug.apk
+# or:
+adb install -r app/build/outputs/apk/release/app-release.apk
+```
+
+On first launch, open **Settings**, enter the HTTPS origin printed by
+`tailscale serve status` (for example,
+`https://<machine-name>.<tailnet-name>.ts.net`), and save it. Enter only the
+origin: the app owns `/healthz` and `/api/v1`; do not add a path, credentials,
+query, or fragment. A server that is unreachable, malformed, or on an
+unsupported API version is shown as an actionable settings/sync error; it
+must not be replaced with an empty project list.
+
+### Widget setup
+
+Add **Facets** from the launcher's widget picker, resize it as needed, and
+choose **all projects** or a comma-separated bounded project-ID subset in its
+configuration screen. Each widget instance stores its selection independently.
+The widget renders the Room snapshot without network I/O, shows cached
+projects and counts immediately, and offers a refresh action that keeps one
+deduplicated WorkManager sync. Tap a project row to open that exact project.
+Removing a widget removes only that instance's selection.
+
+### Release smoke checklist
+
+Run this checklist after installing from a clean app data state against a
+reachable Tailnet server:
+
+1. Configure the HTTPS origin; verify projects and active-task counts load.
+2. Open a project, create a disposable task, edit it, close it, reopen it, and
+   delete it. Confirm each state in the app and again after background refresh.
+3. Place and configure the widget; tap refresh and a project row after a
+   cold-start. Confirm the count and destination match the app.
+4. Enable airplane mode; confirm the last Room snapshot remains visible.
+   Restore connectivity, trigger refresh, and confirm the snapshot recovers
+   without losing task state.
+5. Stop the server or point the app at an incompatible API; confirm the UI
+   reports the connection/API problem with a retry path rather than crashing
+   or silently showing no data.
+
+The same JVM checks are available through `just android-check`. Run connected
+Compose/instrumentation checks on an attached device:
 
 ```sh
 cd android
 ./gradlew :app:connectedDebugAndroidTest
 ```
 
-The same JVM checks are available through `just android-check`; the default
-`just check` remains the Go format, test, vet, and binary-build check. The
-repository's Android workflow runs the debug build, lint, and JVM tests on
+The repository's Android workflow runs the debug build, lint, and JVM tests on
 every Android change. A manually dispatched workflow provisions an API 35
-emulator for connected tests.
+emulator for connected tests. The release smoke checklist is intentionally
+device/Tailnet-dependent and is not substituted with mocks.
+
+### Troubleshooting, update, and uninstall
+
+- `Unable to connect` or an API error: check Tailnet enrollment, `tailscale
+  serve status`, `systemctl --user status facets.service`, and the HTTPS
+  `/healthz` endpoint from the device.
+- Empty or stale data: keep the app configured with the origin, restore network
+  access, and use widget/app refresh; cached data remains available offline.
+- A widget does not update: remove and re-add it after confirming WorkManager
+  has network access; its configuration is per widget instance.
+- Update without clearing user data: install the new APK with `adb install -r`
+  or use the normal package updater.
+- Remove the app and its local cache: `adb uninstall dev.barnlab.facets`.
+  Remove the workstation service and Tailnet mapping separately with
+  `just tailnet-uninstall`; see [`docs/tailnet.md`](docs/tailnet.md).

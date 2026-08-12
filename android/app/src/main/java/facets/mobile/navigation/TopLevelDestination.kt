@@ -14,11 +14,12 @@ enum class TopLevelDestination(
     HOME("home", "Home"),
     TASKS("tasks", "Tasks"),
     PROJECTS("projects", "Projects"),
+    SETTINGS("settings", "Settings"),
 }
 
-private val topLevelDestinationSaver = Saver<TopLevelDestination, String>(
-    save = { it.name },
-    restore = ::restoreTopLevelDestination,
+private val topLevelDestinationSaver = Saver<MutableState<TopLevelDestination>, String>(
+    save = { it.value.name },
+    restore = { savedName -> mutableStateOf(restoreTopLevelDestination(savedName)) },
 )
 
 /** Restores a destination saved by Compose, falling back safely for old state. */

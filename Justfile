@@ -43,6 +43,35 @@ build:
 install:
     go install ./cmd/facets
 
+# Install and enable the loopback-only Tailnet service.
+tailnet-install:
+    @set -eu; \
+      bin_dir="$HOME/.local/bin"; \
+      config_home="${XDG_CONFIG_HOME:-$HOME/.config}"; \
+      mkdir -p "$bin_dir" "$config_home/systemd/user"; \
+      GOBIN="$bin_dir" go install ./cmd/facets; \
+      install -m 0644 deployment/facets.service "$config_home/systemd/user/facets.service"; \
+      systemctl --user daemon-reload; \
+      systemctl --user enable --now facets.service
+
+# Verify a Tailnet Serve endpoint from an enrolled device.
+tailnet-verify host:
+    @set -eu; \
+      systemctl --user is-active --quiet facets.service; \
+      tailscale serve status; \
+      curl --fail --silent --show-error "https://{{ host }}/healthz"; \
+      curl --fail --silent --show-error "https://{{ host }}/api/v1"
+
+# Disable and remove the Tailnet service and its Serve mapping.
+tailnet-uninstall:
+    @set -eu; \
+      systemctl --user disable --now facets.service 2>/dev/null || true; \
+      tailscale serve reset; \
+      config_home="${XDG_CONFIG_HOME:-$HOME/.config}"; \
+      rm -f "$config_home/systemd/user/facets.service"; \
+      systemctl --user daemon-reload; \
+      rm -f "$HOME/.local/bin/facets"
+
 # Install the Quickshell GUI and icon into user XDG directories.
 install-gui:
     @config_home="${XDG_CONFIG_HOME:-$HOME/.config}"; \

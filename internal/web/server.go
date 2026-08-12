@@ -14,6 +14,7 @@ import (
 	"reflect"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -98,6 +99,13 @@ func newWithRegistry(logger *slog.Logger, projects ProjectSource, registry *stor
 	mux.HandleFunc("GET /{$}", s.index)
 	mux.HandleFunc("GET /partials/status", s.status)
 	mux.HandleFunc("GET /healthz", s.health)
+	mux.HandleFunc(apiV1Prefix+"/projects", s.apiV1Projects)
+	mux.HandleFunc(apiV1Prefix+"/projects/{project_id}", s.apiV1Project)
+	mux.HandleFunc(apiV1Prefix+"/projects/{project_id}/tasks", s.apiV1Tasks)
+	mux.HandleFunc(apiV1Prefix+"/projects/{project_id}/tasks/{task_id}", s.apiV1Task)
+	mux.HandleFunc(apiV1Prefix+"/projects/{project_id}/tasks/{task_id}/comments", s.apiV1CommentTask)
+	mux.HandleFunc(apiV1Prefix+"/projects/{project_id}/tasks/{task_id}/close", s.apiV1CloseTask)
+	mux.HandleFunc(apiV1Prefix+"/projects/{project_id}/tasks/{task_id}/reopen", s.apiV1ReopenTask)
 	mux.HandleFunc(apiV1Prefix+"/views", s.apiV1Views)
 	mux.HandleFunc(apiV1Prefix+"/views/{view_id}", s.apiV1View)
 	mux.HandleFunc(apiV1Prefix+"/projects/{project_id}/views/{view_id}/tasks", s.apiV1ExecuteView)
@@ -108,14 +116,16 @@ func newWithRegistry(logger *slog.Logger, projects ProjectSource, registry *stor
 }
 
 type server struct {
-	logger     *slog.Logger
-	projects   ProjectSource
-	provider   project.Provider
-	service    *project.Service
-	registry   *store.Store
-	summarizer *status.Builder
-	templates  *template.Template
-	requests   atomic.Uint64
+	logger       *slog.Logger
+	projects     ProjectSource
+	provider     project.Provider
+	service      *project.Service
+	registry     *store.Store
+	summarizer   *status.Builder
+	templates    *template.Template
+	requests     atomic.Uint64
+	taskCreateMu sync.Mutex
+	taskCreates  map[string]apiV1IdempotentTask
 }
 type projectView struct {
 	project.Project

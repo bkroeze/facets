@@ -1,0 +1,21 @@
+[Unit]
+Description=Facets dashboard over the local loopback interface
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+WorkingDirectory=%h/Projects/facets
+Environment=PATH=%h/.local/bin:%h/go/bin:/usr/local/bin:/usr/bin
+Environment=FACETS_ADDR=127.0.0.1:8080
+ExecStartPre=/usr/bin/tailscale serve --https=443 http://127.0.0.1:8080
+ExecStart=%h/.local/bin/facets serve --addr 127.0.0.1:8080
+Restart=on-failure
+RestartSec=5s
+TimeoutStopSec=15s
+KillSignal=SIGTERM
+NoNewPrivileges=true
+PrivateTmp=true
+UMask=0077
+
+[Install]
+WantedBy=default.target
