@@ -241,8 +241,10 @@ func apiV1ServiceError(err error) (int, string, string) {
 		return http.StatusUnprocessableEntity, "validation_failed", "The request contains invalid values."
 	case errors.Is(err, project.ErrNotFound), errors.Is(err, store.ErrNotFound):
 		return http.StatusNotFound, "not_found", "The requested resource does not exist."
-	case errors.Is(err, project.ErrProviderExists):
+	case errors.Is(err, project.ErrConflict), errors.Is(err, project.ErrProviderExists):
 		return http.StatusConflict, "conflict", "The requested change conflicts with existing state."
+	case errors.Is(err, project.ErrStorage):
+		return http.StatusInternalServerError, "internal_error", "Facets could not complete the request."
 	case errors.Is(err, project.ErrUnsupported):
 		return http.StatusNotImplemented, "unsupported_operation", "The configured provider does not support this operation."
 	case errors.Is(err, context.DeadlineExceeded):

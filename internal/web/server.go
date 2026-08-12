@@ -59,7 +59,15 @@ func newWithRegistry(logger *slog.Logger, projects ProjectSource, registry *stor
 	}
 	var service *project.Service
 	if provider != nil {
-		created, err := project.NewService(provider)
+		var (
+			created *project.Service
+			err     error
+		)
+		if registry != nil {
+			created, err = project.NewService(provider, registry)
+		} else {
+			created, err = project.NewService(provider)
+		}
 		if err != nil {
 			return nil, fmt.Errorf("web: create project service: %w", err)
 		}
@@ -90,6 +98,9 @@ func newWithRegistry(logger *slog.Logger, projects ProjectSource, registry *stor
 	mux.HandleFunc("GET /{$}", s.index)
 	mux.HandleFunc("GET /partials/status", s.status)
 	mux.HandleFunc("GET /healthz", s.health)
+	mux.HandleFunc(apiV1Prefix+"/views", s.apiV1Views)
+	mux.HandleFunc(apiV1Prefix+"/views/{view_id}", s.apiV1View)
+	mux.HandleFunc(apiV1Prefix+"/projects/{project_id}/views/{view_id}/tasks", s.apiV1ExecuteView)
 	mux.HandleFunc(apiV1Prefix, s.apiV1Root)
 	mux.HandleFunc(apiV1Prefix+"/", s.apiV1Fallback)
 	mux.HandleFunc("/", s.fallback)

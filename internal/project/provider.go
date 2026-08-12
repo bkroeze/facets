@@ -9,7 +9,9 @@ import (
 
 var (
 	ErrInvalid          = errors.New("project: invalid input")
+	ErrConflict         = errors.New("project: conflict")
 	ErrNotFound         = errors.New("project: not found")
+	ErrStorage          = errors.New("project: storage failure")
 	ErrUnsupported      = errors.New("project: operation unsupported")
 	ErrProviderExists   = errors.New("project: provider already registered")
 	ErrProviderNotFound = errors.New("project: provider not registered")
@@ -64,6 +66,67 @@ type ProjectPatch struct {
 // TaskFilter narrows a task listing. A nil status includes every status.
 type TaskFilter struct {
 	Status *Status
+}
+
+// TaskQuery describes a provider-neutral saved task selection. Empty fields do
+// not restrict the result.
+type TaskQuery struct {
+	Statuses   []Status `json:"statuses"`
+	Assignees  []string `json:"assignees"`
+	Priorities []int    `json:"priorities"`
+}
+
+// TaskOrder defines deterministic task ordering.
+type TaskOrder struct {
+	Field     string `json:"field"`
+	Direction string `json:"direction"`
+}
+
+const (
+	TaskOrderTitle     = "title"
+	TaskOrderStatus    = "status"
+	TaskOrderPriority  = "priority"
+	TaskOrderAssignee  = "assignee"
+	TaskOrderCreatedAt = "created_at"
+	TaskOrderUpdatedAt = "updated_at"
+
+	TaskOrderAscending  = "asc"
+	TaskOrderDescending = "desc"
+)
+
+// SavedView is a named provider-neutral task query.
+type SavedView struct {
+	ID        string
+	Name      string
+	Builtin   bool
+	Query     TaskQuery
+	Order     TaskOrder
+	CreatedAt time.Time
+	UpdatedAt time.Time
+}
+
+// SavedViewInput contains fields used to create a saved view.
+type SavedViewInput struct {
+	Name  string
+	Query TaskQuery
+	Order TaskOrder
+}
+
+// SavedViewPatch contains saved-view fields to replace when non-nil.
+type SavedViewPatch struct {
+	Name  *string
+	Query *TaskQuery
+	Order *TaskOrder
+}
+
+// SavedViewStore persists user-defined views. Built-in views are synthesized
+// by Service and never passed to this interface.
+type SavedViewStore interface {
+	ListSavedViews(context.Context) ([]SavedView, error)
+	GetSavedView(context.Context, string) (SavedView, error)
+	CreateSavedView(context.Context, SavedView) (SavedView, error)
+	UpdateSavedView(context.Context, string, SavedViewPatch) (SavedView, error)
+	DeleteSavedView(context.Context, string) error
 }
 
 // TaskInput contains fields used to create a task.

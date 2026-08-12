@@ -3,6 +3,7 @@ package project
 import (
 	"context"
 	"fmt"
+	"reflect"
 	"sort"
 	"strings"
 )
@@ -12,15 +13,37 @@ import (
 // providers remain responsible for translating normalized operations to their
 // external system.
 type Service struct {
-	provider Provider
+	provider  Provider
+	viewStore SavedViewStore
 }
 
-// NewService constructs an application service for provider.
-func NewService(provider Provider) (*Service, error) {
+// NewService constructs an application service for provider. A single optional
+// saved-view store enables persisted view operations.
+func NewService(provider Provider, stores ...SavedViewStore) (*Service, error) {
 	if provider == nil || isNilProvider(provider) {
 		return nil, fmt.Errorf("project service: provider is required")
 	}
-	return &Service{provider: provider}, nil
+	if len(stores) > 1 {
+		return nil, fmt.Errorf("project service: only one saved-view store is supported")
+	}
+	service := &Service{provider: provider}
+	if len(stores) == 1 {
+		if stores[0] == nil || isNilSavedViewStore(stores[0]) {
+			return nil, fmt.Errorf("project service: saved-view store is required")
+		}
+		service.viewStore = stores[0]
+	}
+	return service, nil
+}
+
+func isNilSavedViewStore(store SavedViewStore) bool {
+	value := reflect.ValueOf(store)
+	switch value.Kind() {
+	case reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Pointer, reflect.Slice:
+		return value.IsNil()
+	default:
+		return false
+	}
 }
 
 // ListProjects returns projects in a stable display order.

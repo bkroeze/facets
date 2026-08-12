@@ -148,6 +148,7 @@ type serviceProviderStub struct {
 	task     Task
 
 	listProjectID   string
+	listFilter      TaskFilter
 	createCalls     int
 	updateCalls     int
 	updateProjectID string
@@ -169,8 +170,9 @@ func (*serviceProviderStub) UpdateProject(context.Context, string, ProjectPatch)
 	return Project{}, nil
 }
 func (*serviceProviderStub) DeleteProject(context.Context, string) error { return nil }
-func (p *serviceProviderStub) ListTasks(_ context.Context, projectID string, _ TaskFilter) ([]Task, error) {
+func (p *serviceProviderStub) ListTasks(_ context.Context, projectID string, filter TaskFilter) ([]Task, error) {
 	p.listProjectID = projectID
+	p.listFilter = filter
 	return p.tasks, nil
 }
 func (p *serviceProviderStub) GetTask(context.Context, string, string) (Task, error) {

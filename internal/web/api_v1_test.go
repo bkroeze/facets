@@ -155,6 +155,7 @@ func TestAPIV1ServiceErrorMapping(t *testing.T) {
 		{name: "validation", err: project.ErrInvalid, status: http.StatusUnprocessableEntity, code: "validation_failed"},
 		{name: "not found", err: project.ErrNotFound, status: http.StatusNotFound, code: "not_found"},
 		{name: "conflict", err: project.ErrProviderExists, status: http.StatusConflict, code: "conflict"},
+		{name: "storage", err: project.ErrStorage, status: http.StatusInternalServerError, code: "internal_error"},
 		{name: "unsupported", err: project.ErrUnsupported, status: http.StatusNotImplemented, code: "unsupported_operation"},
 		{name: "deadline", err: context.DeadlineExceeded, status: http.StatusGatewayTimeout, code: "provider_timeout"},
 		{name: "canceled", err: context.Canceled, status: http.StatusRequestTimeout, code: "request_canceled"},

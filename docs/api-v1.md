@@ -150,6 +150,31 @@ The non-deletable built-in view has ID `active`, selects `open` tasks, and defau
 
 Within `query`, an empty array means no restriction for that field. Priorities are integers from 0 through 4. Supported order fields are `title`, `status`, `priority`, `assignee`, `created_at`, and `updated_at`; directions are `asc` and `desc`.
 
+Create requests contain `name`, `query`, and `order`. Omitted or empty `query`
+fields mean no restriction. If `order` is omitted or empty, Facets uses
+`updated_at` descending. Facets canonicalizes duplicate query values before
+persisting the view.
+
+```json
+{
+  "name": "Assigned priority",
+  "query": {
+    "statuses": ["open"],
+    "assignees": ["bruce"],
+    "priorities": [1, 2]
+  },
+  "order": {
+    "field": "priority",
+    "direction": "asc"
+  }
+}
+```
+
+PATCH accepts any non-empty subset of `name`, `query`, and `order`; these
+fields cannot be null. Saved views are global Facets definitions and can be
+executed for any project. Execution applies supported predicates to normalized
+tasks and always uses task ID ascending as the final ordering tie-breaker.
+
 | Method | Path | Success |
 | --- | --- | --- |
 | `GET` | `/api/v1/views` | `200 {"views":[SavedView...]}` |
@@ -159,7 +184,10 @@ Within `query`, an empty array means no restriction for that field. Priorities a
 | `DELETE` | `/api/v1/views/{view_id}` | `204` with no body |
 | `GET` | `/api/v1/projects/{project_id}/views/{view_id}/tasks` | `200 {"tasks":[Task...]}` |
 
-The built-in `active` view cannot be updated or deleted. Unsupported provider predicates return `501 unsupported_operation`; they are not silently ignored.
+The built-in `active` view cannot be updated or deleted. Facets evaluates all
+defined query predicates against normalized tasks, independent of provider.
+Unknown predicate fields are rejected as `400 invalid_request`; they are never
+silently ignored.
 
 ## Errors
 

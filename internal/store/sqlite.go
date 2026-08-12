@@ -15,7 +15,7 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-const schemaVersion = 2
+const schemaVersion = 3
 
 var ErrNotFound = errors.New("store: not found")
 
@@ -154,6 +154,21 @@ func migrate(ctx context.Context, db *sql.DB) error {
 			PRAGMA user_version = 2;
 		`); err != nil {
 			return fmt.Errorf("store: migrate schema to version 2: %w", err)
+		}
+	}
+	if version < 3 {
+		if _, err := tx.ExecContext(ctx, `
+			CREATE TABLE saved_views (
+				id TEXT PRIMARY KEY CHECK (length(id) > 0),
+				name TEXT NOT NULL COLLATE NOCASE UNIQUE CHECK (length(trim(name)) > 0),
+				query_json TEXT NOT NULL,
+				order_json TEXT NOT NULL,
+				created_at INTEGER NOT NULL,
+				updated_at INTEGER NOT NULL
+			) STRICT;
+			PRAGMA user_version = 3;
+		`); err != nil {
+			return fmt.Errorf("store: migrate schema to version 3: %w", err)
 		}
 	}
 
@@ -394,6 +409,177 @@ func (s *Store) SetProjectMetadata(ctx context.Context, source, id, key, value s
 	current.Metadata = cloneMetadata(current.Metadata)
 	return current, nil
 }
+
+// ListSavedViews returns persisted user-defined views. Built-in views are not stored.
+func (s *Store) ListSavedViews(ctx context.Context) ([]project.SavedView, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT id, name, query_json, order_json, created_at, updated_at
+		FROM saved_views
+		ORDER BY name COLLATE NOCASE, id
+	`)
+	if err != nil {
+		return nil, fmt.Errorf("store: list saved views: %w", err)
+	}
+	defer rows.Close()
+	views := make([]project.SavedView, 0)
+	for rows.Next() {
+		view, err := scanSavedView(rows)
+		if err != nil {
+			return nil, err
+		}
+		views = append(views, view)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("store: list saved views: %w", err)
+	}
+	return views, nil
+}
+
+// GetSavedView returns one persisted user-defined view.
+func (s *Store) GetSavedView(ctx context.Context, id string) (project.SavedView, error) {
+	if id == "" {
+		return project.SavedView{}, errors.New("store: saved view ID is required")
+	}
+	return scanSavedView(s.db.QueryRowContext(ctx, `
+		SELECT id, name, query_json, order_json, created_at, updated_at
+		FROM saved_views
+		WHERE id = ?
+	`, id))
+}
+
+// CreateSavedView persists one user-defined view.
+func (s *Store) CreateSavedView(ctx context.Context, view project.SavedView) (project.SavedView, error) {
+	if view.ID == "" {
+		return project.SavedView{}, errors.New("store: saved view ID is required")
+	}
+	view.Name = strings.TrimSpace(view.Name)
+	if view.Name == "" {
+		return project.SavedView{}, errors.New("store: saved view name is required")
+	}
+	queryJSON, orderJSON, err := encodeSavedView(view.Query, view.Order)
+	if err != nil {
+		return project.SavedView{}, err
+	}
+	now := time.Now().UTC().UnixMilli()
+	created, err := scanSavedView(s.db.QueryRowContext(ctx, `
+		INSERT INTO saved_views (id, name, query_json, order_json, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?)
+		RETURNING id, name, query_json, order_json, created_at, updated_at
+	`, view.ID, view.Name, queryJSON, orderJSON, now, now))
+	if err != nil {
+		if isUniqueConstraint(err) {
+			return project.SavedView{}, project.ErrConflict
+		}
+		return project.SavedView{}, err
+	}
+	return created, nil
+}
+
+// UpdateSavedView replaces the supplied fields on one persisted view.
+func (s *Store) UpdateSavedView(ctx context.Context, id string, patch project.SavedViewPatch) (project.SavedView, error) {
+	if id == "" {
+		return project.SavedView{}, errors.New("store: saved view ID is required")
+	}
+	set := make([]string, 0, 4)
+	args := make([]any, 0, 5)
+	if patch.Name != nil {
+		set = append(set, "name = ?")
+		args = append(args, *patch.Name)
+	}
+	if patch.Query != nil {
+		encoded, err := json.Marshal(*patch.Query)
+		if err != nil {
+			return project.SavedView{}, fmt.Errorf("store: encode saved view query: %w", err)
+		}
+		set = append(set, "query_json = ?")
+		args = append(args, string(encoded))
+	}
+	if patch.Order != nil {
+		encoded, err := json.Marshal(*patch.Order)
+		if err != nil {
+			return project.SavedView{}, fmt.Errorf("store: encode saved view order: %w", err)
+		}
+		set = append(set, "order_json = ?")
+		args = append(args, string(encoded))
+	}
+	if len(set) == 0 {
+		return project.SavedView{}, errors.New("store: saved view patch must contain a change")
+	}
+	set = append(set, "updated_at = ?")
+	args = append(args, time.Now().UTC().UnixMilli(), id)
+	statement := `
+		UPDATE saved_views
+		SET ` + strings.Join(set, ", ") + `
+		WHERE id = ?
+		RETURNING id, name, query_json, order_json, created_at, updated_at
+	`
+	view, err := scanSavedView(s.db.QueryRowContext(ctx, statement, args...))
+	if err != nil {
+		if isUniqueConstraint(err) {
+			return project.SavedView{}, project.ErrConflict
+		}
+		return project.SavedView{}, err
+	}
+	return view, nil
+}
+
+// DeleteSavedView removes one persisted user-defined view.
+func (s *Store) DeleteSavedView(ctx context.Context, id string) error {
+	if id == "" {
+		return errors.New("store: saved view ID is required")
+	}
+	result, err := s.db.ExecContext(ctx, `DELETE FROM saved_views WHERE id = ?`, id)
+	if err != nil {
+		return fmt.Errorf("store: delete saved view: %w", err)
+	}
+	if err := requireChangedRow(result); err != nil {
+		if errors.Is(err, ErrNotFound) {
+			return project.ErrNotFound
+		}
+		return err
+	}
+	return nil
+}
+
+func encodeSavedView(query project.TaskQuery, order project.TaskOrder) (string, string, error) {
+	queryJSON, err := json.Marshal(query)
+	if err != nil {
+		return "", "", fmt.Errorf("store: encode saved view query: %w", err)
+	}
+	orderJSON, err := json.Marshal(order)
+	if err != nil {
+		return "", "", fmt.Errorf("store: encode saved view order: %w", err)
+	}
+	return string(queryJSON), string(orderJSON), nil
+}
+
+func scanSavedView(row rowScanner) (project.SavedView, error) {
+	var (
+		view                 project.SavedView
+		queryJSON, orderJSON string
+		createdAt, updatedAt int64
+	)
+	if err := row.Scan(&view.ID, &view.Name, &queryJSON, &orderJSON, &createdAt, &updatedAt); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return project.SavedView{}, project.ErrNotFound
+		}
+		return project.SavedView{}, fmt.Errorf("store: read saved view: %w", err)
+	}
+	if err := json.Unmarshal([]byte(queryJSON), &view.Query); err != nil {
+		return project.SavedView{}, fmt.Errorf("store: decode saved view query: %w", err)
+	}
+	if err := json.Unmarshal([]byte(orderJSON), &view.Order); err != nil {
+		return project.SavedView{}, fmt.Errorf("store: decode saved view order: %w", err)
+	}
+	view.CreatedAt = time.UnixMilli(createdAt).UTC()
+	view.UpdatedAt = time.UnixMilli(updatedAt).UTC()
+	return view, nil
+}
+
+func isUniqueConstraint(err error) bool {
+	return strings.Contains(err.Error(), "UNIQUE constraint failed")
+}
+
 func providerMetadata(tx *sql.Tx, source, id string, incoming map[string]any) (map[string]any, error) {
 	metadata := cloneMetadata(incoming)
 	var existing string

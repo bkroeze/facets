@@ -203,7 +203,7 @@ func TestOpenRejectsNewerSchema(t *testing.T) {
 	if err := db.QueryRowContext(ctx, "PRAGMA journal_mode = DELETE").Scan(&journalMode); err != nil {
 		t.Fatalf("set journal_mode error = %v", err)
 	}
-	if _, err := db.ExecContext(ctx, "PRAGMA user_version = 3"); err != nil {
+	if _, err := db.ExecContext(ctx, fmt.Sprintf("PRAGMA user_version = %d", schemaVersion+1)); err != nil {
 		t.Fatalf("set user_version error = %v", err)
 	}
 	if err := db.Close(); err != nil {
@@ -289,6 +289,106 @@ func TestProjectRegistrySyncPreservesLocalMetadata(t *testing.T) {
 	}
 	if final.LastSeen.Before(first.LastSeen) {
 		t.Fatalf("last seen moved backwards: first=%v final=%v", first.LastSeen, final.LastSeen)
+	}
+}
+
+func TestSavedViewLifecyclePersists(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "facets.db")
+	store := openTestStore(t, ctx, path)
+	view := project.SavedView{
+		ID: "view-1", Name: "Mine",
+		Query: project.TaskQuery{Statuses: []project.Status{project.StatusOpen}, Assignees: []string{"bruce"}, Priorities: []int{1, 3}},
+		Order: project.TaskOrder{Field: project.TaskOrderPriority, Direction: project.TaskOrderAscending},
+	}
+	created, err := store.CreateSavedView(ctx, view)
+	if err != nil {
+		t.Fatalf("CreateSavedView() error = %v", err)
+	}
+	if created.ID != view.ID || created.Name != view.Name || created.CreatedAt.IsZero() || created.UpdatedAt.IsZero() {
+		t.Fatalf("CreateSavedView() = %#v", created)
+	}
+	if _, err := store.CreateSavedView(ctx, project.SavedView{ID: "view-2", Name: "mine"}); !errors.Is(err, project.ErrConflict) {
+		t.Fatalf("CreateSavedView(duplicate name) error = %v, want ErrConflict", err)
+	}
+
+	name := "Assigned"
+	query := project.TaskQuery{Assignees: []string{"sam"}}
+	updated, err := store.UpdateSavedView(ctx, created.ID, project.SavedViewPatch{Name: &name, Query: &query})
+	if err != nil {
+		t.Fatalf("UpdateSavedView() error = %v", err)
+	}
+	if updated.Name != name || len(updated.Query.Assignees) != 1 || updated.Query.Assignees[0] != "sam" || updated.Order != created.Order {
+		t.Fatalf("UpdateSavedView() = %#v", updated)
+	}
+
+	if err := store.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+	store = openTestStore(t, ctx, path)
+	views, err := store.ListSavedViews(ctx)
+	if err != nil {
+		t.Fatalf("ListSavedViews() error = %v", err)
+	}
+	if len(views) != 1 || views[0].ID != created.ID || views[0].Name != name {
+		t.Fatalf("ListSavedViews() = %#v", views)
+	}
+	if err := store.DeleteSavedView(ctx, created.ID); err != nil {
+		t.Fatalf("DeleteSavedView() error = %v", err)
+	}
+	if err := store.DeleteSavedView(ctx, created.ID); !errors.Is(err, project.ErrNotFound) {
+		t.Fatalf("DeleteSavedView(missing) error = %v, want project.ErrNotFound", err)
+	}
+}
+
+func TestVersionTwoMigrationPreservesProjectRegistry(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "facets.db")
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatalf("sql.Open() error = %v", err)
+	}
+	_, err = db.ExecContext(ctx, `
+		CREATE TABLE projects (
+			id INTEGER PRIMARY KEY,
+			name TEXT NOT NULL,
+			slug TEXT NOT NULL UNIQUE,
+			created_at INTEGER NOT NULL,
+			updated_at INTEGER NOT NULL
+		) STRICT;
+		CREATE TABLE project_registry (
+			source TEXT NOT NULL,
+			project_id TEXT NOT NULL,
+			name TEXT NOT NULL,
+			metadata TEXT NOT NULL DEFAULT '{}',
+			first_seen INTEGER NOT NULL,
+			last_seen INTEGER NOT NULL,
+			PRIMARY KEY (source, project_id)
+		) STRICT;
+		INSERT INTO project_registry VALUES ('kata', 'facets', 'Facets', '{"directory":"/work/facets"}', 1, 2);
+		PRAGMA user_version = 2;
+	`)
+	if err != nil {
+		t.Fatalf("seed version 2 database: %v", err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatalf("close seed database: %v", err)
+	}
+
+	store := openTestStore(t, ctx, path)
+	registered, err := store.RegisteredProject(ctx, "kata", "facets")
+	if err != nil {
+		t.Fatalf("RegisteredProject() error = %v", err)
+	}
+	if registered.Metadata["directory"] != "/work/facets" || registered.Name != "Facets" {
+		t.Fatalf("migrated registry record = %#v", registered)
+	}
+	if views, err := store.ListSavedViews(ctx); err != nil || len(views) != 0 {
+		t.Fatalf("ListSavedViews() = %#v, %v", views, err)
 	}
 }
 
