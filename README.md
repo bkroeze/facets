@@ -416,6 +416,11 @@ FACETS_ADDR=127.0.0.1:8080 facets serve
 
 The server logs structured request and error records to stderr. It shuts down gracefully on `SIGINT` or `SIGTERM`.
 
+The versioned JSON API root is available at `GET /api/v1`. It returns the
+selected contract version and uses a stable JSON error envelope for every path
+under `/api/v1`. See [`docs/api-v1.md`](docs/api-v1.md) for resource shapes,
+lifecycle requests, ordering, nullability, and error codes.
+
 ## Output and errors
 
 Command results are written to stdout as [TOON](https://toonformat.dev/) by default. Use `--json` when another program needs JSON:

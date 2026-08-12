@@ -8,6 +8,7 @@ import (
 )
 
 var (
+	ErrInvalid          = errors.New("project: invalid input")
 	ErrNotFound         = errors.New("project: not found")
 	ErrUnsupported      = errors.New("project: operation unsupported")
 	ErrProviderExists   = errors.New("project: provider already registered")

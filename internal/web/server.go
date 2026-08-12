@@ -57,6 +57,14 @@ func newWithRegistry(logger *slog.Logger, projects ProjectSource, registry *stor
 		}
 		provider = providers[0]
 	}
+	var service *project.Service
+	if provider != nil {
+		created, err := project.NewService(provider)
+		if err != nil {
+			return nil, fmt.Errorf("web: create project service: %w", err)
+		}
+		service = created
+	}
 	templates, err := template.New("facets").Funcs(template.FuncMap{
 		"sessionCount": func(value int) string {
 			if value == status.UnknownSessionCount {
@@ -74,7 +82,7 @@ func newWithRegistry(logger *slog.Logger, projects ProjectSource, registry *stor
 	}
 
 	s := &server{
-		logger: logger, projects: projects, provider: provider, registry: registry,
+		logger: logger, projects: projects, provider: provider, service: service, registry: registry,
 		summarizer: status.NewBuilder(), templates: templates,
 	}
 	mux := http.NewServeMux()
@@ -82,14 +90,17 @@ func newWithRegistry(logger *slog.Logger, projects ProjectSource, registry *stor
 	mux.HandleFunc("GET /{$}", s.index)
 	mux.HandleFunc("GET /partials/status", s.status)
 	mux.HandleFunc("GET /healthz", s.health)
+	mux.HandleFunc(apiV1Prefix, s.apiV1Root)
+	mux.HandleFunc(apiV1Prefix+"/", s.apiV1Fallback)
 	mux.HandleFunc("/", s.fallback)
-	return s.observe(mux), nil
+	return s.observe(s.rejectMalformedAPIPaths(mux)), nil
 }
 
 type server struct {
 	logger     *slog.Logger
 	projects   ProjectSource
 	provider   project.Provider
+	service    *project.Service
 	registry   *store.Store
 	summarizer *status.Builder
 	templates  *template.Template
@@ -129,7 +140,7 @@ func isNilProjectSource(source ProjectSource) bool {
 }
 
 func (s *server) index(w http.ResponseWriter, r *http.Request) {
-	projects, err := s.projects.ListProjects(r.Context())
+	projects, err := s.listProjects(r.Context())
 	if err != nil {
 		s.respondError(w, r, http.StatusBadGateway, "Projects unavailable", "Facets could not load projects from the configured provider. Try again shortly.", err)
 		return
@@ -165,6 +176,13 @@ func (s *server) index(w http.ResponseWriter, r *http.Request) {
 	if err := s.render(w, http.StatusOK, "index.html", data); err != nil {
 		s.respondError(w, r, http.StatusInternalServerError, "Dashboard unavailable", "Facets could not render this view. Try again shortly.", err)
 	}
+}
+
+func (s *server) listProjects(ctx context.Context) ([]project.Project, error) {
+	if s.service != nil {
+		return s.service.ListProjects(ctx)
+	}
+	return s.projects.ListProjects(ctx)
 }
 
 func (s *server) projectDirectory(ctx context.Context, source, id string) (string, error) {
@@ -269,7 +287,12 @@ func (s *server) observe(next http.Handler) http.Handler {
 			if recovered := recover(); recovered != nil {
 				s.logger.ErrorContext(r.Context(), "panic while serving request", "request_id", requestID, "panic", recovered)
 				if recorder.status == 0 {
-					s.respondError(recorder, r, http.StatusInternalServerError, "Unexpected server error", "Facets hit an unexpected error. The failure was logged.", fmt.Errorf("panic: %v", recovered))
+					cause := fmt.Errorf("panic: %v", recovered)
+					if isAPIPath(r.URL.Path) {
+						s.respondAPIError(recorder, r, http.StatusInternalServerError, "internal_error", "Facets could not complete the request.", nil, cause)
+					} else {
+						s.respondError(recorder, r, http.StatusInternalServerError, "Unexpected server error", "Facets hit an unexpected error. The failure was logged.", cause)
+					}
 				}
 			}
 			status := recorder.status
