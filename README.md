@@ -447,3 +447,40 @@ go test ./...
 go vet ./...
 go run ./cmd/facets serve --addr 127.0.0.1:8080
 ```
+
+## Android app
+
+The native Android app lives under [`android/`](android/). It is intentionally
+separate from the Go CLI, web dashboard, and Quickshell widget.
+
+### Prerequisites
+
+- Android SDK Platform 36 and build tools installed through Android Studio or
+  the Android SDK manager;
+- JDK 17;
+- an emulator or physical device is only required for instrumentation tests.
+
+The app compiles and targets API 36 and supports Android API 26 and newer. No
+machine-local SDK path or signing secret belongs in this repository. The
+text-only `android/gradlew` launcher uses an installed Gradle when available,
+or downloads the pinned distribution when it is missing.
+
+Run the deterministic debug build, lint, and JVM tests from the checkout:
+
+```sh
+cd android
+./gradlew :app:assembleDebug :app:lintDebug test
+```
+
+To run the Compose instrumentation smoke test on an available device:
+
+```sh
+cd android
+./gradlew :app:connectedDebugAndroidTest
+```
+
+The same JVM checks are available through `just android-check`; the default
+`just check` remains the Go format, test, vet, and binary-build check. The
+repository's Android workflow runs the debug build, lint, and JVM tests on
+every Android change. A manually dispatched workflow provisions an API 35
+emulator for connected tests.

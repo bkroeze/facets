@@ -1,0 +1,39 @@
+#!/bin/sh
+# Text-only wrapper: use an installed Gradle or fetch the pinned distribution.
+set -eu
+
+APP_HOME=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+
+if command -v gradle >/dev/null 2>&1; then
+    exec gradle --project-dir "$APP_HOME" "$@"
+fi
+
+GRADLE_VERSION=8.11.1
+GRADLE_HOME="${GRADLE_USER_HOME:-$HOME/.gradle}/wrapper/dists/facets-gradle/$GRADLE_VERSION/gradle-$GRADLE_VERSION"
+GRADLE_BIN="$GRADLE_HOME/bin/gradle"
+
+if [ ! -x "$GRADLE_BIN" ]; then
+    cache_dir=$(dirname "$GRADLE_HOME")
+    archive="$cache_dir/gradle-$GRADLE_VERSION-bin.zip"
+    mkdir -p "$cache_dir"
+    if [ ! -f "$archive" ]; then
+        if command -v curl >/dev/null 2>&1; then
+            curl --fail --location --retry 3 \
+                "https://services.gradle.org/distributions/gradle-$GRADLE_VERSION-bin.zip" \
+                --output "$archive"
+        elif command -v wget >/dev/null 2>&1; then
+            wget --output-document "$archive" \
+                "https://services.gradle.org/distributions/gradle-$GRADLE_VERSION-bin.zip"
+        else
+            echo "Gradle is not installed and neither curl nor wget is available" >&2
+            exit 1
+        fi
+    fi
+    command -v unzip >/dev/null 2>&1 || {
+        echo "Gradle is not installed and unzip is not available" >&2
+        exit 1
+    }
+    unzip -q "$archive" -d "$cache_dir"
+fi
+
+exec "$GRADLE_BIN" --project-dir "$APP_HOME" "$@"

@@ -60,3 +60,15 @@ check: fmt-check test vet build
 # Remove generated local build artifacts.
 clean:
     rm -rf bin
+
+# Build, lint, and run Android JVM tests without changing the default Go check.
+android-check:
+    cd android && ./gradlew :app:assembleDebug :app:lintDebug test
+
+# Build the Android debug APK only.
+android-debug:
+    cd android && ./gradlew :app:assembleDebug
+
+# Run Android instrumentation tests on an attached device or emulator.
+android-instrumentation:
+    cd android && ./gradlew :app:connectedDebugAndroidTest

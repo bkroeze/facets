@@ -1,2 +1,7 @@
 .kata.local.toml
 /bin/
+
+# Android/Gradle local state and build outputs.
+android/.gradle/
+android/local.properties
+android/**/build/
