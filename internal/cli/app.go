@@ -247,6 +247,8 @@ func (a *App) listTasks(ctx context.Context, stdout, stderr io.Writer, cfg runCo
 	fs := commandFlags(usageCommand + " list")
 	statusValue := "open"
 	fieldsValue := "id,title,status"
+	allProjects := fs.Bool("all-projects", false, "list tasks across enabled projects")
+	includeDisabled := fs.Bool("all", false, "include disabled projects with --all-projects")
 	fs.StringVar(&statusValue, "status", "open", "open, closed, or all")
 	fs.StringVar(&fieldsValue, "fields", "id,title,status", "comma-separated output fields")
 	if code := a.parseFlags(stdout, cfg.format, fs, args, tasksListHelp()); code >= 0 {
@@ -270,22 +272,74 @@ func (a *App) listTasks(ctx context.Context, stdout, stderr io.Writer, cfg runCo
 		a.usageError(stdout, cfg.format, err.Error(), fmt.Sprintf("Use `%s --fields id,title,status` or choose from priority,assignee,updated", usageCommand))
 		return 2
 	}
-	provider, projectID, taskCommand, code := a.taskDependencies(ctx, stdout, stderr, cfg)
+
+	provider, code := a.selectProvider(stdout, cfg)
 	if code != 0 {
 		return code
 	}
-	tasks, err := provider.ListTasks(ctx, projectID, project.TaskFilter{Status: status})
-	if err != nil {
-		return a.providerError(stdout, stderr, cfg.format, "could not list tasks", err, fmt.Sprintf("Retry with `%s --status %s`", taskCommand, shellQuote(statusValue)))
+	projectID := "all"
+	taskCommand := selectedFacetsCommand(cfg) + " tasks"
+	var tasks []project.Task
+	if *allProjects || *includeDisabled {
+		projects, listErr := provider.ListProjects(ctx)
+		if listErr != nil {
+			return a.providerError(stdout, stderr, cfg.format, "could not list projects", listErr, fmt.Sprintf("Retry with `%s tasks list --all-projects`", selectedFacetsCommand(cfg)))
+		}
+		if a.ProjectStore != nil {
+			if syncErr := a.ProjectStore.SyncProjects(ctx, provider.Name(), projects); syncErr != nil {
+				return a.providerError(stdout, stderr, cfg.format, "could not save project registry", syncErr, fmt.Sprintf("Check the local database and retry `%s tasks list --all-projects`", selectedFacetsCommand(cfg)))
+			}
+		}
+		for _, item := range projects {
+			if !*includeDisabled && a.ProjectStore != nil {
+				registered, lookupErr := a.ProjectStore.RegisteredProject(ctx, provider.Name(), item.ID)
+				if lookupErr != nil {
+					return a.providerError(stdout, stderr, cfg.format, fmt.Sprintf("could not load project %q metadata", item.ID), lookupErr, "Check the local project registry and retry")
+				}
+				if registered.DisabledAt != nil {
+					continue
+				}
+			}
+			projectTasks, listErr := provider.ListTasks(ctx, item.ID, project.TaskFilter{Status: status})
+			if listErr != nil {
+				return a.providerError(stdout, stderr, cfg.format, fmt.Sprintf("could not list tasks for project %q", item.ID), listErr, fmt.Sprintf("Retry with `%s tasks list --all-projects`", selectedFacetsCommand(cfg)))
+			}
+			for _, task := range projectTasks {
+				if !strings.Contains(task.ID, "#") {
+					task.ID = item.ID + "#" + task.ID
+				}
+				tasks = append(tasks, task)
+			}
+		}
+	} else {
+		var taskProjectID string
+		var taskCode int
+		provider, taskProjectID, taskCommand, taskCode = a.taskDependencies(ctx, stdout, stderr, cfg)
+		if taskCode != 0 {
+			return taskCode
+		}
+		projectID = taskProjectID
+		tasks, err = provider.ListTasks(ctx, projectID, project.TaskFilter{Status: status})
+		if err != nil {
+			return a.providerError(stdout, stderr, cfg.format, "could not list tasks", err, fmt.Sprintf("Retry with `%s --status %s`", taskCommand, shellQuote(statusValue)))
+		}
 	}
 	doc := object{{name: "project", value: projectID}, {name: "count", value: len(tasks)}, {name: "tasks", value: taskTable(tasks, columns)}}
 	if len(tasks) == 0 {
-		doc = append(doc, field{name: "message", value: fmt.Sprintf("0 %s tasks found in project %q", statusValue, projectID)})
+		scope := fmt.Sprintf("in project %q", projectID)
+		if *allProjects || *includeDisabled {
+			scope = "across all projects"
+		}
+		doc = append(doc, field{name: "message", value: fmt.Sprintf("0 %s tasks found %s", statusValue, scope)})
 	}
-	doc = append(doc, field{name: "help", value: primitiveArray{
+	help := primitiveArray{
 		fmt.Sprintf("Run `%s show <id>` to view task details", taskCommand),
 		fmt.Sprintf("Run `%s create \"<title>\"` to create a task", taskCommand),
-	}})
+	}
+	if *allProjects || *includeDisabled {
+		help = primitiveArray{"Task IDs use project#task format", fmt.Sprintf("Run `%s tasks list --status all --all-projects` to include closed tasks", selectedFacetsCommand(cfg))}
+	}
+	doc = append(doc, field{name: "help", value: help})
 	a.write(stdout, cfg.format, doc)
 	return 0
 }

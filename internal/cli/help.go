@@ -32,11 +32,13 @@ func tasksHelp() object {
 }
 
 func tasksListHelp() object {
-	return helpDocument("facets tasks [list] [flags]", "List tasks in the discovered project",
+	return helpDocument("facets tasks [list] [--all-projects] [--all] [flags]", "List tasks in the discovered project or across projects",
 		table{columns: []string{"name", "default", "description"}, rows: [][]any{
+			{"--all-projects", "false", "list tasks from every enabled project; skips project discovery"},
+			{"--all", "false", "include disabled projects; implies --all-projects"},
 			{"--status <open|closed|all>", "open", "task status"},
 			{"--fields <list>", "id,title,status", "subset of id,title,status,priority,assignee,updated"},
-		}}, primitiveArray{"facets tasks", "facets tasks list --status all", "facets tasks --fields id,title,priority,updated"}, nil)
+		}}, primitiveArray{"facets tasks", "facets tasks list --all-projects", "facets tasks list --all", "facets tasks list --status all --all-projects", "facets tasks --fields id,title,priority,updated"}, nil)
 }
 
 func taskDaemonHelp() object {

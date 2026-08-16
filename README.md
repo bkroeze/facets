@@ -76,10 +76,19 @@ List tasks. Open tasks are shown by default:
 ```sh
 facets tasks
 facets tasks list --status all
+facets tasks list --all-projects
+facets tasks list --all
+facets tasks list --status all --all-projects --fields id,title,priority,updated
 facets tasks --status closed --fields id,title,priority,updated
 ```
 
-`--status` accepts `open`, `closed`, or `all`. `--fields` accepts a comma-separated subset of `id`, `title`, `status`, `priority`, `assignee`, and `updated`.
+`--status` accepts `open`, `closed`, or `all`. `--fields` accepts a
+comma-separated subset of `id`, `title`, `status`, `priority`, `assignee`, and
+`updated`. `--all-projects` skips project discovery and lists tasks from every
+enabled provider project. `--all` implies `--all-projects` and includes
+disabled projects too. Both flags are valid together. Cross-project task IDs
+use the `project#task` form, such as `alpha#T-123`. Existing status and field
+filters still apply.
 
 Show a task. Bodies longer than 1,000 characters are truncated unless `--full` is set:
 

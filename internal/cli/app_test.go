@@ -20,6 +20,7 @@ type fakeProvider struct {
 	name               string
 	projects           []project.Project
 	tasks              []project.Task
+	tasksByProject     map[string][]project.Task
 	err                error
 	listProjectID      string
 	listFilter         project.TaskFilter
@@ -64,6 +65,9 @@ func (f *fakeProvider) UpdateProject(context.Context, string, project.ProjectPat
 func (f *fakeProvider) DeleteProject(context.Context, string) error { return project.ErrUnsupported }
 func (f *fakeProvider) ListTasks(_ context.Context, projectID string, filter project.TaskFilter) ([]project.Task, error) {
 	f.listProjectID, f.listFilter = projectID, filter
+	if f.tasksByProject != nil {
+		return f.tasksByProject[projectID], f.err
+	}
 	return f.tasks, f.err
 }
 func (f *fakeProvider) GetTask(_ context.Context, projectID, id string) (project.Task, error) {
@@ -193,6 +197,68 @@ func TestTaskListTOONJSONFieldsAndEmptyState(t *testing.T) {
 	code, stdout, _ = runCLI(provider, "", map[string]string{}, "--project", "demo", "tasks", "--status", "closed")
 	if code != 0 || !strings.Contains(stdout, "tasks: []") || !strings.Contains(stdout, "0 closed tasks found") {
 		t.Fatalf("empty result code=%d:\n%s", code, stdout)
+	}
+}
+
+func TestTaskListAllUsesCrossProjectIDsAndRetainsFilters(t *testing.T) {
+	provider := &fakeProvider{
+		projects: []project.Project{{ID: "alpha", Name: "Alpha"}, {ID: "beta", Name: "Beta"}},
+		tasks:    []project.Task{sampleTask()},
+	}
+	code, stdout, stderr := runCLI(provider, "", map[string]string{}, "tasks", "list", "--all", "--status", "closed", "--fields", "id,title")
+	if code != 0 {
+		t.Fatalf("code=%d stdout=%s stderr=%s", code, stdout, stderr)
+	}
+	if !strings.Contains(stdout, `project: "all"`) || !strings.Contains(stdout, "count: 2") || !strings.Contains(stdout, "alpha#T-1") || !strings.Contains(stdout, "beta#T-1") {
+		t.Fatalf("all-task output = %s", stdout)
+	}
+	if provider.listFilter.Status == nil || *provider.listFilter.Status != project.StatusClosed {
+		t.Fatalf("all-task filter = %#v", provider.listFilter)
+	}
+}
+
+func TestTaskListProjectFlagsRespectDisabledProjects(t *testing.T) {
+	provider := &fakeProvider{
+		projects: []project.Project{{ID: "alpha", Name: "Alpha"}, {ID: "beta", Name: "Beta"}},
+		tasksByProject: map[string][]project.Task{
+			"alpha": {{ID: "T-1", ProjectID: "alpha", Title: "Alpha task", Status: project.StatusOpen}},
+			"beta":  {{ID: "T-2", ProjectID: "beta", Title: "Beta task", Status: project.StatusOpen}},
+		},
+	}
+	registry, err := store.Open(context.Background(), filepath.Join(t.TempDir(), "facets.db"))
+	if err != nil {
+		t.Fatalf("store.Open() error = %v", err)
+	}
+	defer registry.Close()
+	if err := registry.SyncProjects(context.Background(), provider.Name(), provider.projects); err != nil {
+		t.Fatalf("SyncProjects() error = %v", err)
+	}
+	if _, err := registry.SetProjectDisabled(context.Background(), provider.Name(), "beta", true); err != nil {
+		t.Fatalf("SetProjectDisabled() error = %v", err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	app := App{Provider: provider, ProjectStore: registry, Stdout: &stdout, Stderr: &stderr, Env: map[string]string{}}
+	run := func(args ...string) string {
+		stdout.Reset()
+		stderr.Reset()
+		if code := app.Run(context.Background(), args); code != 0 {
+			t.Fatalf("args=%v code=%d stdout=%s stderr=%s", args, code, stdout.String(), stderr.String())
+		}
+		return stdout.String()
+	}
+
+	output := run("tasks", "list", "--all-projects")
+	if !strings.Contains(output, "count: 1") || !strings.Contains(output, "alpha#T-1") || strings.Contains(output, "beta#T-2") {
+		t.Fatalf("enabled-project output = %s", output)
+	}
+	output = run("tasks", "list", "--all")
+	if !strings.Contains(output, "count: 2") || !strings.Contains(output, "alpha#T-1") || !strings.Contains(output, "beta#T-2") {
+		t.Fatalf("all-project output = %s", output)
+	}
+	output = run("tasks", "list", "--all-projects", "--all")
+	if !strings.Contains(output, "count: 2") {
+		t.Fatalf("combined-flag output = %s", output)
 	}
 }
 
