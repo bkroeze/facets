@@ -15,7 +15,7 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-const schemaVersion = 3
+const schemaVersion = 4
 
 var ErrNotFound = errors.New("store: not found")
 
@@ -35,12 +35,13 @@ type Project struct {
 
 // RegisteredProject is a provider project tracked by the local registry.
 type RegisteredProject struct {
-	Source    string
-	ID        string
-	Name      string
-	Metadata  map[string]any
-	FirstSeen time.Time
-	LastSeen  time.Time
+	Source     string
+	ID         string
+	Name       string
+	Metadata   map[string]any
+	FirstSeen  time.Time
+	LastSeen   time.Time
+	DisabledAt *time.Time
 }
 
 // ProjectInput contains the mutable fields of a project.
@@ -169,6 +170,14 @@ func migrate(ctx context.Context, db *sql.DB) error {
 			PRAGMA user_version = 3;
 		`); err != nil {
 			return fmt.Errorf("store: migrate schema to version 3: %w", err)
+		}
+	}
+	if version < 4 {
+		if _, err := tx.ExecContext(ctx, `
+			ALTER TABLE project_registry ADD COLUMN disabled_at INTEGER;
+			PRAGMA user_version = 4;
+		`); err != nil {
+			return fmt.Errorf("store: migrate schema to version 4: %w", err)
 		}
 	}
 
@@ -332,7 +341,7 @@ func (s *Store) RegisteredProjects(ctx context.Context, source string) ([]Regist
 		return nil, errors.New("store: project source is required")
 	}
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT source, project_id, name, metadata, first_seen, last_seen
+		SELECT source, project_id, name, metadata, first_seen, last_seen, disabled_at
 		FROM project_registry
 		WHERE source = ?
 		ORDER BY project_id
@@ -367,7 +376,7 @@ func (s *Store) RegisteredProject(ctx context.Context, source, id string) (Regis
 		return RegisteredProject{}, errors.New("store: project ID is required")
 	}
 	return scanRegisteredProject(s.db.QueryRowContext(ctx, `
-		SELECT source, project_id, name, metadata, first_seen, last_seen
+		SELECT source, project_id, name, metadata, first_seen, last_seen, disabled_at
 		FROM project_registry
 		WHERE source = ? AND project_id = ?
 	`, source, id))
@@ -408,6 +417,30 @@ func (s *Store) SetProjectMetadata(ctx context.Context, source, id, key, value s
 	}
 	current.Metadata = cloneMetadata(current.Metadata)
 	return current, nil
+}
+
+// SetProjectDisabled records whether a registered project is inactive. A
+// disable timestamp is preserved across repeated disables and cleared on
+// enable so historical registry data remains intact.
+func (s *Store) SetProjectDisabled(ctx context.Context, source, id string, disabled bool) (RegisteredProject, error) {
+	source = strings.TrimSpace(source)
+	id = strings.TrimSpace(id)
+	if source == "" {
+		return RegisteredProject{}, errors.New("store: project source is required")
+	}
+	if id == "" {
+		return RegisteredProject{}, errors.New("store: project ID is required")
+	}
+
+	now := time.Now().UTC().UnixMilli()
+	if _, err := s.db.ExecContext(ctx, `
+		UPDATE project_registry
+		SET disabled_at = CASE WHEN ? THEN COALESCE(disabled_at, ?) ELSE NULL END
+		WHERE source = ? AND project_id = ?
+	`, disabled, now, source, id); err != nil {
+		return RegisteredProject{}, fmt.Errorf("store: set project disabled state: %w", err)
+	}
+	return s.RegisteredProject(ctx, source, id)
 }
 
 // ListSavedViews returns persisted user-defined views. Built-in views are not stored.
@@ -628,13 +661,15 @@ func cleanProjectInput(input ProjectInput) (ProjectInput, error) {
 	}
 	return input, nil
 }
+
 func scanRegisteredProject(row rowScanner) (RegisteredProject, error) {
 	var (
 		registered          RegisteredProject
 		metadata            string
 		firstSeen, lastSeen int64
+		disabledAt          sql.NullInt64
 	)
-	if err := row.Scan(&registered.Source, &registered.ID, &registered.Name, &metadata, &firstSeen, &lastSeen); err != nil {
+	if err := row.Scan(&registered.Source, &registered.ID, &registered.Name, &metadata, &firstSeen, &lastSeen, &disabledAt); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return RegisteredProject{}, ErrNotFound
 		}
@@ -650,6 +685,10 @@ func scanRegisteredProject(row rowScanner) (RegisteredProject, error) {
 	}
 	registered.FirstSeen = time.UnixMilli(firstSeen).UTC()
 	registered.LastSeen = time.UnixMilli(lastSeen).UTC()
+	if disabledAt.Valid {
+		value := time.UnixMilli(disabledAt.Int64).UTC()
+		registered.DisabledAt = &value
+	}
 	return registered, nil
 }
 

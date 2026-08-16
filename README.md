@@ -148,15 +148,21 @@ retries. Runtime diagnostics go to stderr, never into the stdout protocol. Run
 
 ```sh
 facets projects list
+facets projects list --all
 facets projects show facets
 facets projects set facets directory=/home/user/Projects/facets
-facets --json projects list
+facets projects disable thornwear
+facets projects enable thornwear
+facets --json projects list --all
 ```
 
 `projects list` pulls projects from the selected provider and records them in
-the local registry. The registry stores provider source, first-seen and
-last-seen timestamps, provider metadata, and local settings. Set `directory`
-for each project so activity summaries can scope OMP sessions:
+the local registry. Disabled projects are hidden from the default list and
+from the Quickshell task snapshot. Use `projects list --all` to include them
+at the end, with their names in parentheses. The registry stores provider
+source, first-seen and last-seen timestamps, provider metadata, local settings,
+and a disable timestamp without deleting historical data. Set `directory` for
+each project so activity summaries can scope OMP sessions:
 
 ```sh
 facets projects set thornwear directory=/home/user/Projects/thornwear
@@ -173,10 +179,18 @@ task deletion remains recoverable according to Kata's archive semantics.
 
 ## Quickshell widget on Omarchy and Wayland
 
-The app in [`quickshell/facets/shell.qml`](quickshell/facets/shell.qml) is a
-single-screen Quickshell panel. It shows active Facets projects, expands each
-project into its open Kata tasks, and opens a floating Kata TUI in the selected
-project directory.
+Facets has a shared Quickshell panel in
+[`quickshell/facets/FacetsPanel.qml`](quickshell/facets/FacetsPanel.qml):
+It shows active Facets projects, expands each project into its open Kata tasks,
+and opens a floating Kata TUI in the selected project directory.
+
+- Omarchy Quattro loads it as a first-class panel plugin inside the existing
+  `omarchy-shell` process.
+- Older Omarchy installations can still use the standalone
+  [`quickshell/facets/shell.qml`](quickshell/facets/shell.qml) wrapper.
+
+Do not start a second Quickshell process for the Quattro integration. Quattro
+hosts panels, bars, notifications, and OSDs in one long-running shell.
 
 ### Prerequisites
 
@@ -184,8 +198,8 @@ Install these before enabling the widget:
 
 - Quickshell 0.3 or newer;
 - Facets and Kata, with Kata JSON API version 1 configured;
-- Omarchy with Hyprland and UWSM;
-- `xdg-terminal-exec`, normally supplied by the Omarchy desktop;
+- Omarchy Quattro with Hyprland and UWSM;
+- `xdg-terminal-exec`, normally supplied by Omarchy;
 - `facets`, `kata`, `quickshell`, `uwsm-app`, and `xdg-terminal-exec` on the
   graphical session's `PATH`.
 
@@ -213,8 +227,61 @@ usually `$(go env GOPATH)/bin`; add that directory to the UWSM session
 environment if it is absent, then log out and back in. Do not rely on an alias
 or shell function: Quickshell launches argv directly.
 
-### Install or update the app
+### Install on Omarchy Quattro
 
+From the Facets checkout:
+
+```sh
+just install-quattro
+omarchy-shell shell rescanPlugins
+omarchy plugin enable facets
+omarchy-restart-shell
+```
+
+`install-quattro` installs the `facets` binary to `~/.local/bin/facets` and
+copies the plugin manifest and QML panel to `~/.config/omarchy/plugins/facets`.
+The standard Omarchy session imports `~/.local/bin` on its PATH. It does not
+replace `shell.json` or enable unreviewed code. `omarchy plugin enable facets`
+records the plugin in `~/.config/omarchy/shell.json`; Quattro then loads it in
+the existing shell process.
+
+Use Quattro's shell IPC as the launcher:
+
+```sh
+omarchy-shell shell toggle facets
+omarchy-shell shell summon facets
+omarchy-shell shell hide facets
+```
+
+The `toggle` call opens the Facets panel when hidden and closes it when shown.
+The shell IPC command is required for Quattro; do not add a second
+`quickshell --config` autostart entry.
+
+To add a Hyprland binding, merge this line into
+`~/.config/hypr/bindings.conf` after checking that the key is unused:
+
+```ini
+bindd = SUPER SHIFT, F, Facets project tasks, exec, omarchy-shell shell toggle facets
+```
+
+To update the Quattro plugin, pull the new checkout, rerun
+`go install ./cmd/facets` and `just install-quattro`, then run
+`omarchy-shell shell rescanPlugins` and `omarchy-restart-shell`.
+
+To uninstall a checkout-installed plugin:
+
+```sh
+omarchy plugin disable facets
+rm -rf "$HOME/.config/omarchy/plugins/facets"
+omarchy-shell shell rescanPlugins
+```
+
+If the plugin was installed with `omarchy plugin add`, use
+`omarchy plugin remove facets` instead of removing the directory manually.
+
+### Install or update the legacy standalone app
+
+Use this mode only on Omarchy versions without the Quattro shell plugin host.
 From the Facets checkout:
 
 ```sh
@@ -227,6 +294,7 @@ just install-gui
 
 ```text
 $XDG_CONFIG_HOME/quickshell/facets/shell.qml
+$XDG_CONFIG_HOME/quickshell/facets/FacetsPanel.qml
 $XDG_DATA_HOME/facets/facets.svg
 $XDG_DATA_HOME/facets/facets-waybar.svg
 ```
@@ -237,7 +305,6 @@ The current widget generates no cache files. Facets keeps its registry at
 `XDG_DATA_HOME`, export
 `FACETS_DB="${XDG_DATA_HOME:-$HOME/.local/share}/facets/facets.db"` in the
 graphical session.
-
 Sync projects and configure every launchable working directory:
 
 ```sh

@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "id": "facets",
+  "name": "Facets",
+  "version": "1.0.0",
+  "author": "Facets",
+  "description": "Project and task dashboard",
+  "kinds": [
+    "panel"
+  ],
+  "keepLoaded": true,
+  "entryPoints": {
+    "panel": "FacetsPanel.qml"
+  }
+}

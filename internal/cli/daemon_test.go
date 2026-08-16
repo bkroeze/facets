@@ -189,6 +189,30 @@ func TestTaskDaemonInitialSnapshotOrderingFilteringAndCancellation(t *testing.T)
 	}
 }
 
+func TestTaskDaemonOmitsDisabledProjects(t *testing.T) {
+	projects := []project.Project{{ID: "active", Name: "Active"}, {ID: "disabled", Name: "Disabled"}}
+	provider := newMutableDaemonProvider(projects, map[string][]project.Task{
+		"active":   {{ID: "open-active", ProjectID: "active", Title: "Active task", Status: project.StatusOpen}},
+		"disabled": {{ID: "open-disabled", ProjectID: "disabled", Title: "Disabled task", Status: project.StatusOpen}},
+	})
+	registry := openDaemonStore(t, provider)
+	if _, err := registry.SetProjectDisabled(context.Background(), provider.Name(), "disabled", true); err != nil {
+		t.Fatalf("SetProjectDisabled() error = %v", err)
+	}
+
+	scanner, cancel, done, _ := startTaskDaemon(t, provider, registry, 5*time.Second)
+	line := scanDaemonEvent(t, scanner)
+	stopTaskDaemon(t, cancel, done)
+
+	var snapshot taskDaemonSnapshot
+	if err := json.Unmarshal(line, &snapshot); err != nil {
+		t.Fatalf("decode snapshot: %v\n%s", err, line)
+	}
+	if len(snapshot.Projects) != 1 || snapshot.Projects[0].ID != "active" {
+		t.Fatalf("snapshot = %#v", snapshot)
+	}
+}
+
 func TestTaskDaemonRecoversAfterRefreshError(t *testing.T) {
 	projects := []project.Project{{ID: "demo", Name: "Demo"}}
 	provider := newMutableDaemonProvider(projects, map[string][]project.Task{"demo": {{ID: "T-1", Title: "Before", Status: project.StatusOpen}}})

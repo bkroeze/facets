@@ -486,6 +486,51 @@ func TestProjectsCommands(t *testing.T) {
 		t.Fatalf("show JSON err=%v: %s", err, stdout)
 	}
 }
+
+func TestProjectDisableEnableAndListAll(t *testing.T) {
+	provider := &fakeProvider{projects: []project.Project{
+		{ID: "alpha", Name: "Alpha"},
+		{ID: "beta", Name: "Beta"},
+		{ID: "gamma", Name: "Gamma"},
+	}}
+	registry, err := store.Open(context.Background(), filepath.Join(t.TempDir(), "facets.db"))
+	if err != nil {
+		t.Fatalf("store.Open() error = %v", err)
+	}
+	defer registry.Close()
+
+	var stdout, stderr bytes.Buffer
+	app := App{Provider: provider, ProjectStore: registry, Stdout: &stdout, Stderr: &stderr, Env: map[string]string{}}
+	run := func(args ...string) string {
+		stdout.Reset()
+		stderr.Reset()
+		if code := app.Run(context.Background(), args); code != 0 {
+			t.Fatalf("args=%v code=%d stdout=%s stderr=%s", args, code, stdout.String(), stderr.String())
+		}
+		return stdout.String()
+	}
+
+	if output := run("projects", "list"); !strings.Contains(output, "count: 3") {
+		t.Fatalf("initial list = %s", output)
+	}
+	if output := run("projects", "disable", "beta"); !strings.Contains(output, "disabled: true") || !strings.Contains(output, "disabled_at:") {
+		t.Fatalf("disable output = %s", output)
+	}
+	if output := run("projects", "list"); !strings.Contains(output, "count: 2") || strings.Contains(output, "Beta") {
+		t.Fatalf("default list after disable = %s", output)
+	}
+	if output := run("projects", "list", "--all"); !strings.Contains(output, "count: 3") {
+		t.Fatalf("all-project list = %s", output)
+	} else if strings.Index(output, "Gamma") > strings.Index(output, "(Beta)") {
+		t.Fatalf("disabled project was not listed last = %s", output)
+	}
+	if output := run("projects", "enable", "beta"); !strings.Contains(output, "disabled: false") {
+		t.Fatalf("enable output = %s", output)
+	}
+	if output := run("projects", "list"); !strings.Contains(output, "count: 3") || !strings.Contains(output, "Beta") {
+		t.Fatalf("default list after enable = %s", output)
+	}
+}
 func TestProjectRegistrySetAndUnknownActivity(t *testing.T) {
 	root := t.TempDir()
 	if err := os.Mkdir(filepath.Join(root, ".jj"), 0o755); err != nil {

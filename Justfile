@@ -76,12 +76,26 @@ tailnet-uninstall:
 install-gui:
     @config_home="${XDG_CONFIG_HOME:-$HOME/.config}"; \
       data_home="${XDG_DATA_HOME:-$HOME/.local/share}"; \
-      install -Dm644 quickshell/facets/shell.qml "$config_home/quickshell/facets/shell.qml"; \
+      mkdir -p "$data_home/facets"; \
       install -Dm644 assets/facets.svg "$data_home/facets/facets.svg"; \
+      install -Dm644 quickshell/facets/shell.qml "$config_home/quickshell/facets/shell.qml"; \
+      install -m 0644 quickshell/facets/FacetsPanel.qml "$config_home/quickshell/facets/FacetsPanel.qml"; \
       sed 's/<svg /<svg fill="#ffffff" /' assets/facets.svg > "$data_home/facets/facets-waybar.svg"; \
       chmod 644 "$data_home/facets/facets-waybar.svg"; \
       printf 'Installed Facets GUI to %s and icons to %s\n' \
         "$config_home/quickshell/facets" "$data_home/facets"
+
+# Install the Quickshell panel as an Omarchy Quattro plugin.
+install-quattro:
+    @bin_dir="$HOME/.local/bin"; \
+      plugin_dir="$HOME/.config/omarchy/plugins/facets"; \
+      mkdir -p "$bin_dir" "$plugin_dir"; \
+      GOBIN="$bin_dir" go install ./cmd/facets; \
+      install -m 0644 quickshell/facets/manifest.json "$plugin_dir/manifest.json"; \
+      install -m 0644 quickshell/facets/FacetsPanel.qml "$plugin_dir/FacetsPanel.qml"; \
+      printf 'Installed facets to %s and Quattro plugin to %s\n' \
+        "$bin_dir/facets" "$plugin_dir"; \
+      printf 'Run: omarchy-shell shell rescanPlugins && omarchy plugin enable facets\n'
 
 # Run formatting, tests, static analysis, and a build.
 check: fmt-check test vet build

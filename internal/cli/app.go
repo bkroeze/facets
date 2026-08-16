@@ -540,6 +540,7 @@ func (a *App) runProjects(ctx context.Context, stdout, stderr io.Writer, cfg run
 	switch args[0] {
 	case "list":
 		fs := commandFlags(a.projectUsageCommand(cfg) + " list")
+		showAll := fs.Bool("all", false, "include disabled projects at the end")
 		if code := a.parseFlags(stdout, cfg.format, fs, args[1:], projectsListHelp()); code >= 0 {
 			return code
 		}
@@ -556,17 +557,71 @@ func (a *App) runProjects(ctx context.Context, stdout, stderr io.Writer, cfg run
 				return a.providerError(stdout, stderr, cfg.format, "could not save project registry", err, fmt.Sprintf("Check the local database and retry `%s projects list`", selectedFacetsCommand(cfg)))
 			}
 		}
-		rows := make([][]any, len(items))
-		for i, item := range items {
-			rows[i] = []any{item.ID, item.Name}
+		activeRows := make([][]any, 0, len(items))
+		disabledRows := make([][]any, 0)
+		for _, item := range items {
+			disabled := false
+			if a.ProjectStore != nil {
+				registered, lookupErr := a.ProjectStore.RegisteredProject(ctx, provider.Name(), item.ID)
+				if lookupErr != nil {
+					return a.providerError(stdout, stderr, cfg.format, fmt.Sprintf("could not load project %q metadata", item.ID), lookupErr, "Check the local project registry and retry")
+				}
+				disabled = registered.DisabledAt != nil
+			}
+			row := []any{item.ID, item.Name}
+			if disabled {
+				row[1] = "(" + item.Name + ")"
+				disabledRows = append(disabledRows, row)
+			} else {
+				activeRows = append(activeRows, row)
+			}
 		}
-		doc := object{{name: "count", value: len(items)}, {name: "projects", value: table{columns: []string{"id", "name"}, rows: rows}}}
-		if len(items) == 0 {
+		rows := activeRows
+		if *showAll {
+			rows = append(rows, disabledRows...)
+		}
+		doc := object{{name: "count", value: len(rows)}, {name: "projects", value: table{columns: []string{"id", "name"}, rows: rows}}}
+		if len(rows) == 0 {
 			doc = append(doc, field{name: "message", value: "0 projects found"})
 		}
 		projectCommand := selectedFacetsCommand(cfg) + " projects"
 		doc = append(doc, field{name: "help", value: primitiveArray{fmt.Sprintf("Run `%s show <id>` to view project details", projectCommand)}})
 		a.write(stdout, cfg.format, doc)
+		return 0
+	case "disable", "enable":
+		command := args[0]
+		usageCommand := a.projectUsageCommand(cfg) + " " + command
+		if (len(args) == 2 && isHelp(args[1])) || (len(args) == 1 && isHelp(args[0])) {
+			if command == "disable" {
+				a.write(stdout, cfg.format, projectDisableHelp())
+			} else {
+				a.write(stdout, cfg.format, projectEnableHelp())
+			}
+			return 0
+		}
+		if len(args) != 2 || strings.TrimSpace(args[1]) == "" || strings.HasPrefix(args[1], "-") {
+			a.usageError(stdout, cfg.format, "project ID is required", fmt.Sprintf("Run `%s <id>`", usageCommand))
+			return 2
+		}
+		if a.ProjectStore == nil {
+			return a.providerError(stdout, stderr, cfg.format, "project registry is unavailable", errors.New("local project registry is not configured"), "Configure the local Facets database and retry")
+		}
+		provider, code := a.selectProvider(stdout, cfg)
+		if code != 0 {
+			return code
+		}
+		items, err := provider.ListProjects(ctx)
+		if err != nil {
+			return a.providerError(stdout, stderr, cfg.format, "could not list projects", err, fmt.Sprintf("Check provider configuration and retry `%s projects list`", selectedFacetsCommand(cfg)))
+		}
+		if err := a.ProjectStore.SyncProjects(ctx, provider.Name(), items); err != nil {
+			return a.providerError(stdout, stderr, cfg.format, "could not save project registry", err, fmt.Sprintf("Check the local database and retry `%s projects list`", selectedFacetsCommand(cfg)))
+		}
+		registered, err := a.ProjectStore.SetProjectDisabled(ctx, provider.Name(), args[1], command == "disable")
+		if err != nil {
+			return a.providerError(stdout, stderr, cfg.format, fmt.Sprintf("could not %s project %q", command, args[1]), err, fmt.Sprintf("Verify the ID with `%s projects list`", selectedFacetsCommand(cfg)))
+		}
+		a.write(stdout, cfg.format, registeredProjectDocument(registered))
 		return 0
 	case "set":
 		if (len(args) == 2 && isHelp(args[1])) || (len(args) == 3 && isHelp(args[2])) {
@@ -729,16 +784,19 @@ func registeredProjectDocument(registered store.RegisteredProject) object {
 	if directory, ok := registered.Metadata["directory"].(string); ok {
 		metadata = append(metadata, field{name: "directory", value: directory})
 	}
-	return object{
-		{name: "project", value: object{
-			{name: "id", value: registered.ID},
-			{name: "name", value: registered.Name},
-			{name: "source", value: registered.Source},
-			{name: "first_seen", value: formatTime(registered.FirstSeen)},
-			{name: "last_seen", value: formatTime(registered.LastSeen)},
-			{name: "metadata", value: metadata},
-		}},
+	project := object{
+		{name: "id", value: registered.ID},
+		{name: "name", value: registered.Name},
+		{name: "source", value: registered.Source},
+		{name: "first_seen", value: formatTime(registered.FirstSeen)},
+		{name: "last_seen", value: formatTime(registered.LastSeen)},
+		{name: "metadata", value: metadata},
+		{name: "disabled", value: registered.DisabledAt != nil},
 	}
+	if registered.DisabledAt != nil {
+		project = append(project, field{name: "disabled_at", value: formatTime(*registered.DisabledAt)})
+	}
+	return object{{name: "project", value: project}}
 }
 
 func (a *App) runServe(ctx context.Context, stdout, stderr io.Writer, cfg runConfig, args []string) int {

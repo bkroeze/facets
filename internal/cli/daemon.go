@@ -127,9 +127,21 @@ func (a *App) taskDaemonPoll(ctx context.Context, provider project.Provider) (ta
 		return taskDaemonSnapshot{}, fmt.Errorf("sync project registry: %w", err)
 	}
 
-	snapshot := taskDaemonSnapshot{Type: "snapshot", Projects: make([]taskDaemonProject, 0, len(projects))}
-	open := project.StatusOpen
+	activeProjects := make([]project.Project, 0, len(projects))
 	for _, item := range projects {
+		registered, err := a.ProjectStore.RegisteredProject(ctx, provider.Name(), item.ID)
+		if err != nil {
+			return taskDaemonSnapshot{}, fmt.Errorf("read project %q metadata: %w", item.ID, err)
+		}
+		if registered.DisabledAt != nil {
+			continue
+		}
+		activeProjects = append(activeProjects, item)
+	}
+
+	snapshot := taskDaemonSnapshot{Type: "snapshot", Projects: make([]taskDaemonProject, 0, len(activeProjects))}
+	open := project.StatusOpen
+	for _, item := range activeProjects {
 		registered, err := a.ProjectStore.RegisteredProject(ctx, provider.Name(), item.ID)
 		if err != nil {
 			return taskDaemonSnapshot{}, fmt.Errorf("read project %q metadata: %w", item.ID, err)

@@ -292,6 +292,45 @@ func TestProjectRegistrySyncPreservesLocalMetadata(t *testing.T) {
 	}
 }
 
+func TestProjectDisabledStatePersistsAcrossSync(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	store := openTestStore(t, ctx, filepath.Join(t.TempDir(), "facets.db"))
+	items := []project.Project{{ID: "demo", Name: "Demo", Metadata: map[string]any{"remote": "v1"}}}
+	if err := store.SyncProjects(ctx, "kata", items); err != nil {
+		t.Fatalf("SyncProjects() error = %v", err)
+	}
+
+	disabled, err := store.SetProjectDisabled(ctx, "kata", "demo", true)
+	if err != nil {
+		t.Fatalf("SetProjectDisabled(true) error = %v", err)
+	}
+	if disabled.DisabledAt == nil || disabled.DisabledAt.IsZero() {
+		t.Fatalf("disabled record = %#v", disabled)
+	}
+	disabledAt := *disabled.DisabledAt
+
+	if err := store.SyncProjects(ctx, "kata", []project.Project{{ID: "demo", Name: "Renamed", Metadata: map[string]any{"remote": "v2"}}}); err != nil {
+		t.Fatalf("SyncProjects(second) error = %v", err)
+	}
+	current, err := store.RegisteredProject(ctx, "kata", "demo")
+	if err != nil {
+		t.Fatalf("RegisteredProject() error = %v", err)
+	}
+	if current.Name != "Renamed" || current.DisabledAt == nil || *current.DisabledAt != disabledAt {
+		t.Fatalf("synced disabled record = %#v", current)
+	}
+
+	enabled, err := store.SetProjectDisabled(ctx, "kata", "demo", false)
+	if err != nil {
+		t.Fatalf("SetProjectDisabled(false) error = %v", err)
+	}
+	if enabled.DisabledAt != nil {
+		t.Fatalf("enabled record = %#v", enabled)
+	}
+}
+
 func TestSavedViewLifecyclePersists(t *testing.T) {
 	t.Parallel()
 
