@@ -194,6 +194,59 @@ func TestFocusCommandPersistsAndValidates(t *testing.T) {
 		t.Fatalf("CurrentDayFocus() = %#v, %v", current, err)
 	}
 }
+func TestTodayCommandPromptsInteractivelyAndReportsSummary(t *testing.T) {
+	ctx := context.Background()
+	provider := &fakeProvider{
+		projects: []project.Project{{ID: "alpha", Name: "Alpha"}},
+		tasksByProject: map[string][]project.Task{
+			"alpha": {
+				{ID: "top-open", ProjectID: "alpha", Title: "Top open", Status: project.StatusOpen, Metadata: map[string]any{"facets.top": true}},
+				{ID: "top-done", ProjectID: "alpha", Title: "Top done", Status: project.StatusClosed, Metadata: map[string]any{"facets.top": true}, UpdatedAt: time.Now()},
+				{ID: "regular-done", ProjectID: "alpha", Title: "Regular done", Status: project.StatusClosed, UpdatedAt: time.Now()},
+			},
+		},
+	}
+	registry, err := store.Open(ctx, filepath.Join(t.TempDir(), "facets.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer registry.Close()
+
+	var stdout, stderr bytes.Buffer
+	nonInteractive := App{Provider: provider, ProjectStore: registry, Stdout: &stdout, Stderr: &stderr, Stdin: strings.NewReader("ignored\n"), Interactive: func() bool { return false }, Env: map[string]string{}}
+	if code := nonInteractive.Run(ctx, []string{"--format", "json", "today"}); code != 2 || !strings.Contains(stdout.String(), "today's focus is not set") {
+		t.Fatalf("non-interactive today code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
+	}
+
+	stdout.Reset()
+	stderr.Reset()
+	app := App{Provider: provider, ProjectStore: registry, Stdout: &stdout, Stderr: &stderr, Stdin: strings.NewReader("Plan the day\n"), Interactive: func() bool { return true }, Env: map[string]string{}}
+	if code := app.Run(ctx, []string{"--format", "json", "today"}); code != 0 {
+		t.Fatalf("interactive today code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
+	}
+	var decoded struct {
+		Focus struct {
+			Text string `json:"text"`
+		} `json:"focus"`
+		TopTasks []struct {
+			Project string `json:"project"`
+			Title   string `json:"title"`
+		} `json:"top_tasks"`
+		Completed struct {
+			All int `json:"all"`
+			Top int `json:"top"`
+		} `json:"completed_today"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &decoded); err != nil {
+		t.Fatal(err)
+	}
+	if decoded.Focus.Text != "Plan the day" || len(decoded.TopTasks) != 1 || decoded.TopTasks[0].Project != "alpha" || decoded.TopTasks[0].Title != "Top open" || decoded.Completed.All != 2 || decoded.Completed.Top != 1 {
+		t.Fatalf("today output = %#v", decoded)
+	}
+	if !strings.Contains(stderr.String(), "Today's focus: ") {
+		t.Fatalf("prompt missing from stderr: %q", stderr.String())
+	}
+}
 
 func TestListTopTasksAcrossProjectsFiltersMetadataAndStatus(t *testing.T) {
 	now := time.Date(2026, 8, 16, 12, 0, 0, 0, time.UTC)

@@ -155,7 +155,7 @@ retries. Runtime diagnostics go to stderr, never into the stdout protocol. Run
 `facets tasks daemon --help` for the complete event fields and polling limits.
 
 
-## Daily focus
+## Daily focus and today summary
 
 Save today's focus without prompting:
 
@@ -163,9 +163,19 @@ Save today's focus without prompting:
 facets focus "Plan the day"
 ```
 
-The focus text is required as one non-empty argument. `facets focus --help`
-shows the command contract. The command stores the focus with the current
-local day boundary and returns the saved focus plus its timestamps.
+`facets focus` requires one non-empty argument and stores the focus with the
+current local-day boundary. `facets focus --help` shows the command contract.
+
+Show the current focus, open `facets.top=true` tasks, and completion counts:
+
+```sh
+facets today
+```
+
+When no focus exists, an interactive terminal prompts for it and persists the
+answer. Non-interactive execution returns a usage error; set the focus first
+with `facets focus "<text>"`. The output includes project and task identities,
+titles, and counts for all tasks and top tasks completed during the local day.
 
 ## Project commands
 

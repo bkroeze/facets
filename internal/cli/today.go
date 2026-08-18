@@ -1,12 +1,18 @@
 package cli
 
 import (
+	"bufio"
 	"context"
+	"errors"
 	"fmt"
+	"io"
+	"os"
 	"sort"
+	"strings"
 	"time"
 
 	"facets.barnlab.dev/internal/project"
+	"facets.barnlab.dev/internal/store"
 )
 
 type topTask struct {
@@ -96,4 +102,106 @@ func completedToday(ctx context.Context, provider project.Provider, now time.Tim
 		}
 	}
 	return metrics, nil
+}
+func (a *App) runToday(ctx context.Context, stdout, stderr io.Writer, cfg runConfig, args []string) int {
+	usageCommand := "facets today"
+	if len(args) == 1 && isHelp(args[0]) {
+		a.write(stdout, cfg.format, todayHelp())
+		return 0
+	}
+	if len(args) != 0 {
+		a.usageError(stdout, cfg.format, "today does not accept arguments", fmt.Sprintf("Run `%s`", usageCommand))
+		return 2
+	}
+	if a.ProjectStore == nil {
+		return a.providerError(stdout, stderr, cfg.format, "could not load today's focus", errors.New("local project registry is not configured"), "Configure the local Facets database and retry")
+	}
+
+	now := time.Now()
+	focus, err := a.ProjectStore.CurrentDayFocus(ctx, now)
+	if errors.Is(err, store.ErrNotFound) {
+		if !a.isInteractive() {
+			a.usageError(stdout, cfg.format, "today's focus is not set", "Run `facets focus \"<text>\"` or use `facets today` interactively")
+			return 2
+		}
+		focusText, readErr := a.promptTodayFocus(stderr)
+		if readErr != nil {
+			a.usageError(stdout, cfg.format, readErr.Error(), "Run `facets focus \"<text>\"` to set today's focus")
+			return 2
+		}
+		focus, err = a.ProjectStore.CreateDayFocus(ctx, focusText, now)
+	}
+	if err != nil {
+		return a.providerError(stdout, stderr, cfg.format, "could not load today's focus", err, "Retry `facets today`")
+	}
+
+	provider, code := a.selectProvider(stdout, cfg)
+	if code != 0 {
+		return code
+	}
+	topTasks, err := listTopTasks(ctx, provider)
+	if err != nil {
+		return a.providerError(stdout, stderr, cfg.format, "could not list top tasks", err, "Retry `facets today`")
+	}
+	metrics, err := completedToday(ctx, provider, now)
+	if err != nil {
+		return a.providerError(stdout, stderr, cfg.format, "could not calculate today's completion", err, "Retry `facets today`")
+	}
+
+	rows := make([][]any, len(topTasks))
+	for i, item := range topTasks {
+		rows[i] = []any{item.Project.ID, item.Project.Name, item.Task.ID, item.Task.Title}
+	}
+	a.write(stdout, cfg.format, object{
+		{name: "focus", value: object{
+			{name: "text", value: focus.Focus},
+			{name: "day_start", value: formatTime(focus.DayStart)},
+		}},
+		{name: "top_tasks", value: table{
+			columns: []string{"project", "project_name", "task", "title"},
+			rows:    rows,
+		}},
+		{name: "completed_today", value: object{
+			{name: "all", value: metrics.All},
+			{name: "top", value: metrics.Top},
+			{name: "day_start", value: formatTime(metrics.DayStart)},
+			{name: "day_end", value: formatTime(metrics.DayEnd)},
+		}},
+	})
+	return 0
+}
+
+func (a *App) isInteractive() bool {
+	if a.Interactive != nil {
+		return a.Interactive()
+	}
+	stdin := a.Stdin
+	if stdin == nil {
+		stdin = os.Stdin
+	}
+	file, ok := stdin.(*os.File)
+	if !ok {
+		return false
+	}
+	info, err := file.Stat()
+	return err == nil && info.Mode()&os.ModeCharDevice != 0
+}
+
+func (a *App) promptTodayFocus(stderr io.Writer) (string, error) {
+	stdin := a.Stdin
+	if stdin == nil {
+		stdin = os.Stdin
+	}
+	if _, err := fmt.Fprint(stderr, "Today's focus: "); err != nil {
+		return "", fmt.Errorf("could not prompt for today's focus: %w", err)
+	}
+	value, err := bufio.NewReader(stdin).ReadString('\n')
+	if err != nil && !errors.Is(err, io.EOF) {
+		return "", fmt.Errorf("could not read today's focus: %w", err)
+	}
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return "", errors.New("today's focus must not be empty")
+	}
+	return value, nil
 }

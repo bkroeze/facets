@@ -11,10 +11,19 @@ func topHelp() object {
 			{"--json", "false", "alias for --format json"},
 		}},
 		primitiveArray{"facets", "facets --project thornwear tasks", "facets --json projects list", "facets focus \"Plan the day\"", "facets serve --addr :8080"},
-		primitiveArray{"tasks", "projects", "focus", "serve", "help"},
+		primitiveArray{"tasks", "projects", "today", "focus", "serve", "help"},
 	)
 }
 
+func todayHelp() object {
+	return helpDocument("facets today", "Show today's focus, top tasks, and completion counts; prompt for missing focus only on an interactive terminal",
+		table{columns: []string{"name", "default", "description"}, rows: [][]any{
+			{"focus", "prompt when interactive", "persist today's focus; non-interactive runs must set it with `facets focus`"},
+			{"top_tasks", "all open facets.top=true tasks", "show project and task identity plus titles"},
+			{"completed_today", "current local day", "count all completed tasks and top completed tasks"},
+		}},
+		primitiveArray{"facets today", "facets focus \"Plan the day\""}, nil)
+}
 func focusHelp() object {
 	return helpDocument("facets focus <text>", "Save today's focus without prompting",
 		table{columns: []string{"name", "default", "description"}, rows: [][]any{

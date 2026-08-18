@@ -32,6 +32,8 @@ type App struct {
 	ProjectStore       *store.Store
 	Stdout             io.Writer
 	Stderr             io.Writer
+	Stdin              io.Reader
+	Interactive        func() bool
 	Cwd                string
 	Env                map[string]string
 	Getenv             func(string) string
@@ -134,6 +136,8 @@ func (a *App) Run(ctx context.Context, args []string) (code int) {
 		return a.runProjects(ctx, stdout, stderr, cfg, rest[1:])
 	case "focus":
 		return a.runFocus(ctx, stdout, stderr, cfg, rest[1:])
+	case "today":
+		return a.runToday(ctx, stdout, stderr, cfg, rest[1:])
 	case "serve":
 		return a.runServe(ctx, stdout, stderr, cfg, rest[1:])
 	default:
