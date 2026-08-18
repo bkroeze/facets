@@ -15,7 +15,7 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-const schemaVersion = 4
+const schemaVersion = 5
 
 var ErrNotFound = errors.New("store: not found")
 
@@ -42,6 +42,14 @@ type RegisteredProject struct {
 	FirstSeen  time.Time
 	LastSeen   time.Time
 	DisabledAt *time.Time
+}
+
+// DayFocus is a focus entry assigned to a user's local calendar day.
+type DayFocus struct {
+	ID        int64
+	Focus     string
+	DayStart  time.Time
+	CreatedAt time.Time
 }
 
 // ProjectInput contains the mutable fields of a project.
@@ -178,6 +186,21 @@ func migrate(ctx context.Context, db *sql.DB) error {
 			PRAGMA user_version = 4;
 		`); err != nil {
 			return fmt.Errorf("store: migrate schema to version 4: %w", err)
+		}
+	}
+	if version < 5 {
+		if _, err := tx.ExecContext(ctx, `
+			CREATE TABLE day_focus (
+				id INTEGER PRIMARY KEY,
+				focus TEXT NOT NULL CHECK (length(trim(focus)) > 0),
+				day_start INTEGER NOT NULL,
+				created_at INTEGER NOT NULL
+			) STRICT;
+			CREATE INDEX day_focus_day_start_created_at_idx
+				ON day_focus (day_start, created_at, id);
+			PRAGMA user_version = 5;
+		`); err != nil {
+			return fmt.Errorf("store: migrate schema to version 5: %w", err)
 		}
 	}
 
@@ -443,6 +466,39 @@ func (s *Store) SetProjectDisabled(ctx context.Context, source, id string, disab
 	return s.RegisteredProject(ctx, source, id)
 }
 
+// CreateDayFocus stores a focus entry for the local calendar day containing createdAt.
+// Entries are append-only; the latest entry for a day is the current focus.
+func (s *Store) CreateDayFocus(ctx context.Context, focus string, createdAt time.Time) (DayFocus, error) {
+	focus = strings.TrimSpace(focus)
+	if focus == "" {
+		return DayFocus{}, errors.New("store: day focus is required")
+	}
+	if createdAt.IsZero() {
+		return DayFocus{}, errors.New("store: day focus timestamp is required")
+	}
+	dayStart := localDayStart(createdAt)
+	return scanDayFocus(s.db.QueryRowContext(ctx, `
+		INSERT INTO day_focus (focus, day_start, created_at)
+		VALUES (?, ?, ?)
+		RETURNING id, focus, day_start, created_at
+	`, focus, dayStart.UnixMilli(), createdAt.UTC().UnixMilli()))
+}
+
+// CurrentDayFocus returns the latest focus entry for the local calendar day
+// containing now. The location carried by now defines the day boundary.
+func (s *Store) CurrentDayFocus(ctx context.Context, now time.Time) (DayFocus, error) {
+	if now.IsZero() {
+		return DayFocus{}, errors.New("store: current day timestamp is required")
+	}
+	return scanDayFocus(s.db.QueryRowContext(ctx, `
+		SELECT id, focus, day_start, created_at
+		FROM day_focus
+		WHERE day_start = ?
+		ORDER BY created_at DESC, id DESC
+		LIMIT 1
+	`, localDayStart(now).UnixMilli()))
+}
+
 // ListSavedViews returns persisted user-defined views. Built-in views are not stored.
 func (s *Store) ListSavedViews(ctx context.Context) ([]project.SavedView, error) {
 	rows, err := s.db.QueryContext(ctx, `
@@ -554,6 +610,27 @@ func (s *Store) UpdateSavedView(ctx context.Context, id string, patch project.Sa
 		return project.SavedView{}, err
 	}
 	return view, nil
+}
+
+func localDayStart(value time.Time) time.Time {
+	local := value.In(value.Location())
+	return time.Date(local.Year(), local.Month(), local.Day(), 0, 0, 0, 0, local.Location())
+}
+
+func scanDayFocus(row rowScanner) (DayFocus, error) {
+	var (
+		focus               DayFocus
+		dayStart, createdAt int64
+	)
+	if err := row.Scan(&focus.ID, &focus.Focus, &dayStart, &createdAt); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return DayFocus{}, ErrNotFound
+		}
+		return DayFocus{}, fmt.Errorf("store: read day focus: %w", err)
+	}
+	focus.DayStart = time.UnixMilli(dayStart).UTC()
+	focus.CreatedAt = time.UnixMilli(createdAt).UTC()
+	return focus, nil
 }
 
 // DeleteSavedView removes one persisted user-defined view.

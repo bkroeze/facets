@@ -123,6 +123,7 @@ facets tasks reopen T-123
 
 Append further context with `tasks comment`, or reopen the task with `tasks reopen`. All mutations are non-interactive.
 
+
 Delete without an interactive prompt by repeating the exact task ID as confirmation:
 
 ```sh
@@ -152,6 +153,18 @@ recoverable; consumers should retain the last valid snapshot while the daemon
 retries. Runtime diagnostics go to stderr, never into the stdout protocol. Run
 `facets tasks daemon --help` for the complete event fields and polling limits.
 
+
+## Daily focus
+
+Save today's focus without prompting:
+
+```sh
+facets focus "Plan the day"
+```
+
+The focus text is required as one non-empty argument. `facets focus --help`
+shows the command contract. The command stores the focus with the current
+local day boundary and returns the saved focus plus its timestamps.
 
 ## Project commands
 

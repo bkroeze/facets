@@ -331,6 +331,77 @@ func TestProjectDisabledStatePersistsAcrossSync(t *testing.T) {
 	}
 }
 
+func TestDayFocusPersistsAndResolvesByLocalDay(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "facets.db")
+	store := openTestStore(t, ctx, path)
+	location := time.FixedZone("user", -4*60*60)
+	previousDay := time.Date(2026, 8, 15, 23, 59, 0, 0, location)
+	first := time.Date(2026, 8, 16, 9, 0, 0, 0, location)
+	second := time.Date(2026, 8, 16, 17, 0, 0, 0, location)
+
+	if _, err := store.CreateDayFocus(ctx, "  Finish the release  ", previousDay); err != nil {
+		t.Fatalf("CreateDayFocus(previous) error = %v", err)
+	}
+	created, err := store.CreateDayFocus(ctx, "Finish the release", first)
+	if err != nil {
+		t.Fatalf("CreateDayFocus(first) error = %v", err)
+	}
+	if created.Focus != "Finish the release" || !created.CreatedAt.Equal(first.UTC()) || !created.DayStart.Equal(time.Date(2026, 8, 16, 4, 0, 0, 0, time.UTC)) {
+		t.Fatalf("CreateDayFocus(first) = %#v", created)
+	}
+	if _, err := store.CreateDayFocus(ctx, "Ship the release", second); err != nil {
+		t.Fatalf("CreateDayFocus(second) error = %v", err)
+	}
+
+	current, err := store.CurrentDayFocus(ctx, time.Date(2026, 8, 16, 23, 0, 0, 0, location))
+	if err != nil {
+		t.Fatalf("CurrentDayFocus(current day) error = %v", err)
+	}
+	if current.Focus != "Ship the release" || current.ID == created.ID {
+		t.Fatalf("CurrentDayFocus(current day) = %#v", current)
+	}
+	if _, err := store.CurrentDayFocus(ctx, time.Date(2026, 8, 17, 0, 1, 0, 0, location)); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("CurrentDayFocus(next day) error = %v, want ErrNotFound", err)
+	}
+
+	var count int
+	if err := store.db.QueryRowContext(ctx, "SELECT count(*) FROM day_focus").Scan(&count); err != nil {
+		t.Fatalf("count day_focus rows error = %v", err)
+	}
+	if count != 3 {
+		t.Fatalf("day_focus row count = %d, want 3", count)
+	}
+
+	if err := store.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+	store = openTestStore(t, ctx, path)
+	persisted, err := store.CurrentDayFocus(ctx, second)
+	if err != nil || persisted.Focus != "Ship the release" {
+		t.Fatalf("CurrentDayFocus(reopened) = %#v, %v", persisted, err)
+	}
+}
+
+func TestDayFocusValidation(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	store := openTestStore(t, ctx, filepath.Join(t.TempDir(), "facets.db"))
+	now := time.Date(2026, 8, 16, 12, 0, 0, 0, time.UTC)
+	if _, err := store.CreateDayFocus(ctx, " ", now); err == nil {
+		t.Fatal("CreateDayFocus(blank) error = nil")
+	}
+	if _, err := store.CreateDayFocus(ctx, "focus", time.Time{}); err == nil {
+		t.Fatal("CreateDayFocus(zero time) error = nil")
+	}
+	if _, err := store.CurrentDayFocus(ctx, time.Time{}); err == nil {
+		t.Fatal("CurrentDayFocus(zero time) error = nil")
+	}
+}
+
 func TestSavedViewLifecyclePersists(t *testing.T) {
 	t.Parallel()
 
@@ -428,6 +499,9 @@ func TestVersionTwoMigrationPreservesProjectRegistry(t *testing.T) {
 	}
 	if views, err := store.ListSavedViews(ctx); err != nil || len(views) != 0 {
 		t.Fatalf("ListSavedViews() = %#v, %v", views, err)
+	}
+	if _, err := store.CurrentDayFocus(ctx, time.Date(2026, 8, 16, 12, 0, 0, 0, time.UTC)); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("CurrentDayFocus() after legacy migration error = %v, want ErrNotFound", err)
 	}
 }
 

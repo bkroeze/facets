@@ -125,6 +125,8 @@ func (a *App) Run(ctx context.Context, args []string) (code int) {
 		return a.runTasks(ctx, stdout, stderr, cfg, rest[1:])
 	case "projects":
 		return a.runProjects(ctx, stdout, stderr, cfg, rest[1:])
+	case "focus":
+		return a.runFocus(ctx, stdout, stderr, cfg, rest[1:])
 	case "serve":
 		return a.runServe(ctx, stdout, stderr, cfg, rest[1:])
 	default:
@@ -176,6 +178,32 @@ func (a *App) runHome(ctx context.Context, stdout, stderr io.Writer, cfg runConf
 		}})
 	}
 	a.write(stdout, cfg.format, doc)
+	return 0
+}
+
+func (a *App) runFocus(ctx context.Context, stdout, stderr io.Writer, cfg runConfig, args []string) int {
+	usageCommand := "facets focus"
+	if len(args) == 1 && isHelp(args[0]) {
+		a.write(stdout, cfg.format, focusHelp())
+		return 0
+	}
+	if len(args) != 1 || strings.TrimSpace(args[0]) == "" {
+		a.usageError(stdout, cfg.format, "focus text is required as one argument", fmt.Sprintf("Run `%s \"<text>\"`", usageCommand))
+		return 2
+	}
+	if a.ProjectStore == nil {
+		return a.providerError(stdout, stderr, cfg.format, "could not save focus", errors.New("local project registry is not configured"), "Configure the local Facets database and retry")
+	}
+	created, err := a.ProjectStore.CreateDayFocus(ctx, args[0], time.Now())
+	if err != nil {
+		return a.providerError(stdout, stderr, cfg.format, "could not save focus", err, fmt.Sprintf("Retry `%s \"<text>\"`", usageCommand))
+	}
+	a.write(stdout, cfg.format, object{
+		{name: "focus", value: created.Focus},
+		{name: "day_start", value: formatTime(created.DayStart)},
+		{name: "created_at", value: formatTime(created.CreatedAt)},
+		{name: "message", value: "Today's focus saved"},
+	})
 	return 0
 }
 

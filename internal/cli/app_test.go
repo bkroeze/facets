@@ -164,6 +164,91 @@ func TestNoArgsShowsHomeAndOpenTasks(t *testing.T) {
 	}
 }
 
+func TestFocusCommandPersistsAndValidates(t *testing.T) {
+	ctx := context.Background()
+	registry, err := store.Open(ctx, filepath.Join(t.TempDir(), "facets.db"))
+	if err != nil {
+		t.Fatalf("store.Open() error = %v", err)
+	}
+	defer registry.Close()
+
+	var stdout, stderr bytes.Buffer
+	app := App{ProjectStore: registry, Stdout: &stdout, Stderr: &stderr, Env: map[string]string{}}
+	if code := app.Run(ctx, []string{"focus", "--help"}); code != 0 || !strings.Contains(stdout.String(), "facets focus <text>") {
+		t.Fatalf("focus help code=%d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+	}
+	stdout.Reset()
+	if code := app.Run(ctx, []string{"focus"}); code != 2 || !strings.Contains(stdout.String(), "focus text is required") {
+		t.Fatalf("missing focus code=%d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+	}
+	stdout.Reset()
+	if code := app.Run(ctx, []string{"focus", " "}); code != 2 || !strings.Contains(stdout.String(), "focus text is required") {
+		t.Fatalf("blank focus code=%d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+	}
+	stdout.Reset()
+	if code := app.Run(ctx, []string{"focus", "Plan the day"}); code != 0 || !strings.Contains(stdout.String(), "Today's focus saved") {
+		t.Fatalf("save focus code=%d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+	}
+	current, err := registry.CurrentDayFocus(ctx, time.Now())
+	if err != nil || current.Focus != "Plan the day" {
+		t.Fatalf("CurrentDayFocus() = %#v, %v", current, err)
+	}
+}
+
+func TestListTopTasksAcrossProjectsFiltersMetadataAndStatus(t *testing.T) {
+	now := time.Date(2026, 8, 16, 12, 0, 0, 0, time.UTC)
+	provider := &fakeProvider{
+		projects: []project.Project{{ID: "beta", Name: "Beta"}, {ID: "alpha", Name: "Alpha"}},
+		tasksByProject: map[string][]project.Task{
+			"alpha": {
+				{ID: "top", ProjectID: "alpha", Title: "Top alpha", Status: project.StatusOpen, Metadata: map[string]any{"facets.top": true}, UpdatedAt: now},
+				{ID: "closed", ProjectID: "alpha", Title: "Closed alpha", Status: project.StatusClosed, Metadata: map[string]any{"facets.top": true}, UpdatedAt: now},
+				{ID: "string", ProjectID: "alpha", Title: "String alpha", Status: project.StatusOpen, Metadata: map[string]any{"facets.top": "true"}, UpdatedAt: now},
+			},
+			"beta": {
+				{ID: "missing", ProjectID: "beta", Title: "Missing beta", Status: project.StatusOpen, UpdatedAt: now},
+				{ID: "false", ProjectID: "beta", Title: "False beta", Status: project.StatusOpen, Metadata: map[string]any{"facets.top": false}, UpdatedAt: now},
+			},
+		},
+	}
+	tasks, err := listTopTasks(context.Background(), provider)
+	if err != nil {
+		t.Fatalf("listTopTasks() error = %v", err)
+	}
+	if len(tasks) != 1 || tasks[0].Project.ID != "alpha" || tasks[0].Task.ID != "top" || tasks[0].Task.Title != "Top alpha" {
+		t.Fatalf("listTopTasks() = %#v", tasks)
+	}
+	if provider.listFilter.Status == nil || *provider.listFilter.Status != project.StatusOpen {
+		t.Fatalf("top-task filter = %#v", provider.listFilter)
+	}
+}
+
+func TestCompletedTodayUsesLocalBoundariesAndTopMetadata(t *testing.T) {
+	location := time.FixedZone("user", -4*60*60)
+	dayStart := time.Date(2026, 8, 16, 0, 0, 0, 0, location)
+	provider := &fakeProvider{
+		projects: []project.Project{{ID: "alpha", Name: "Alpha"}},
+		tasksByProject: map[string][]project.Task{
+			"alpha": {
+				{ID: "before", Status: project.StatusClosed, UpdatedAt: dayStart.Add(-time.Nanosecond)},
+				{ID: "start", Status: project.StatusClosed, Metadata: map[string]any{"facets.top": true}, UpdatedAt: dayStart},
+				{ID: "end", Status: project.StatusClosed, UpdatedAt: dayStart.AddDate(0, 0, 1)},
+				{ID: "open", Status: project.StatusOpen, Metadata: map[string]any{"facets.top": true}, UpdatedAt: dayStart.Add(time.Hour)},
+				{ID: "regular", Status: project.StatusClosed, UpdatedAt: dayStart.Add(2 * time.Hour)},
+			},
+		},
+	}
+	metrics, err := completedToday(context.Background(), provider, dayStart.Add(12*time.Hour))
+	if err != nil {
+		t.Fatalf("completedToday() error = %v", err)
+	}
+	if metrics.All != 2 || metrics.Top != 1 || !metrics.DayStart.Equal(dayStart) || !metrics.DayEnd.Equal(dayStart.AddDate(0, 0, 1)) {
+		t.Fatalf("completedToday() = %#v", metrics)
+	}
+	if provider.listFilter.Status == nil || *provider.listFilter.Status != project.StatusClosed {
+		t.Fatalf("completion filter = %#v", provider.listFilter)
+	}
+}
 func TestTaskListTOONJSONFieldsAndEmptyState(t *testing.T) {
 	provider := &fakeProvider{tasks: []project.Task{sampleTask()}}
 	code, stdout, _ := runCLI(provider, "", map[string]string{}, "--project", "demo", "tasks", "--status", "all", "--fields", "id,priority,assignee,updated")

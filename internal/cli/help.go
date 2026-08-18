@@ -10,8 +10,17 @@ func topHelp() object {
 			{"--format <toon|json>", "toon", "stdout format"},
 			{"--json", "false", "alias for --format json"},
 		}},
-		primitiveArray{"facets", "facets --project thornwear tasks", "facets --json projects list", "facets serve --addr :8080"},
-		primitiveArray{"tasks", "projects", "serve", "help"},
+		primitiveArray{"facets", "facets --project thornwear tasks", "facets --json projects list", "facets focus \"Plan the day\"", "facets serve --addr :8080"},
+		primitiveArray{"tasks", "projects", "focus", "serve", "help"},
+	)
+}
+
+func focusHelp() object {
+	return helpDocument("facets focus <text>", "Save today's focus without prompting",
+		table{columns: []string{"name", "default", "description"}, rows: [][]any{
+			{"<text>", "required", "focus text for today; quote text containing spaces"},
+		}},
+		primitiveArray{"facets focus \"Plan the day\""}, nil,
 	)
 }
 

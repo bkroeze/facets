@@ -277,6 +277,23 @@ func TestTaskCRUDCommandsFiltersAndMapping(t *testing.T) {
 	runner.done()
 }
 
+func TestListTasksPreservesTopMetadataType(t *testing.T) {
+	issue := strings.Replace(openIssue, `"native.key": "native-value"`, `"facets.top": true, "native.key": "native-value"`, 1)
+	runner := &scriptedRunner{t: t, steps: []scriptStep{
+		step([]string{"list", "--project", "alpha", "--status", "open"}, issuesEnvelope(issue)),
+	}}
+	provider := New(Config{Binary: "/test/kata", Actor: "robot", Runner: runner})
+	status := project.StatusOpen
+	tasks, err := provider.ListTasks(context.Background(), "alpha", project.TaskFilter{Status: &status})
+	if err != nil {
+		t.Fatalf("ListTasks() error = %v", err)
+	}
+	if len(tasks) != 1 || tasks[0].Metadata["facets.top"] != true {
+		t.Fatalf("top metadata = %#v", tasks)
+	}
+	runner.done()
+}
+
 func assertMappedTask(t *testing.T, task project.Task) {
 	t.Helper()
 	if task.ID != "op21" || task.ProjectID != "alpha" || task.Title != "Open task" || task.Description != "task body" || task.Status != project.StatusOpen || task.Priority == nil || *task.Priority != 1 || task.Assignee != "sam" {
