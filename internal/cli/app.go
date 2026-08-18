@@ -41,9 +41,10 @@ type App struct {
 }
 
 type runConfig struct {
-	project  string
-	provider string
-	format   string
+	project   string
+	provider  string
+	format    string
+	formatSet bool
 }
 
 type trackingWriter struct {
@@ -87,7 +88,7 @@ func (a *App) Run(ctx context.Context, args []string) (code int) {
 	var jsonAlias bool
 	global.StringVar(&cfg.project, "project", "", "project ID (default: discovered from the workspace)")
 	global.StringVar(&cfg.provider, "provider", "kata", "provider name")
-	global.StringVar(&cfg.format, "format", "toon", "output format: toon or json")
+	global.StringVar(&cfg.format, "format", "toon", "output format: human, json, or toon")
 	global.BoolVar(&jsonAlias, "json", false, "alias for --format json")
 	if err := global.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
@@ -97,15 +98,20 @@ func (a *App) Run(ctx context.Context, args []string) (code int) {
 		a.usageError(stdout, normalizedFormat(cfg.format, jsonAlias), err.Error(), "Run `facets help` for command usage")
 		return 2
 	}
+	global.Visit(func(flag *flag.Flag) {
+		if flag.Name == "format" {
+			cfg.formatSet = true
+		}
+	})
 	if jsonAlias {
 		if cfg.format != "toon" && cfg.format != "json" {
-			a.usageError(stdout, "json", "--format must be toon or json", "Use `--format toon` or `--format json`")
+			a.usageError(stdout, "toon", "--json cannot be combined with a non-JSON --format", "Use `--format json` or omit `--format`")
 			return 2
 		}
 		cfg.format = "json"
 	}
-	if cfg.format != "toon" && cfg.format != "json" {
-		a.usageError(stdout, "toon", "--format must be toon or json", "Use `--format toon` or `--format json`")
+	if !validFormat(cfg.format) {
+		a.usageError(stdout, "toon", fmt.Sprintf("invalid --format %q", cfg.format), "Use `--format human`, `--format json`, or `--format toon`")
 		return 2
 	}
 
@@ -113,6 +119,7 @@ func (a *App) Run(ctx context.Context, args []string) (code int) {
 	if len(rest) == 0 {
 		return a.runHome(ctx, stdout, stderr, cfg)
 	}
+
 	switch rest[0] {
 	case "help":
 		if len(rest) != 1 {
@@ -139,7 +146,14 @@ func normalizedFormat(format string, jsonAlias bool) string {
 	if jsonAlias || format == "json" {
 		return "json"
 	}
+	if format == "human" {
+		return "human"
+	}
 	return "toon"
+}
+
+func validFormat(format string) bool {
+	return format == "human" || format == "json" || format == "toon"
 }
 
 func (a *App) runHome(ctx context.Context, stdout, stderr io.Writer, cfg runConfig) int {

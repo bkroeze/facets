@@ -912,6 +912,7 @@ func TestInvalidUTF8MakesRunOperational(t *testing.T) {
 	for _, args := range [][]string{
 		{"--project", "demo", "tasks", "show", "T-1"},
 		{"--project", "demo", "--json", "tasks", "show", "T-1"},
+		{"--project", "demo", "--format", "human", "tasks", "show", "T-1"},
 	} {
 		code, stdout, stderr := runCLI(provider, "", map[string]string{}, args...)
 		if code != 1 || stdout != "" || stderr != "" {
@@ -933,5 +934,44 @@ func TestStdoutWriteFailureOverridesExitCode(t *testing.T) {
 		if stderr.Len() != 0 {
 			t.Errorf("args=%v stderr=%q", args, stderr.String())
 		}
+	}
+}
+func TestHumanFormatRendersTasksHelpAndErrors(t *testing.T) {
+	provider := &fakeProvider{tasks: []project.Task{sampleTask()}}
+	code, stdout, stderr := runCLI(provider, "", map[string]string{}, "--format", "human", "--project", "demo", "tasks")
+	if code != 0 || stderr != "" {
+		t.Fatalf("human tasks code=%d stderr=%q stdout=%q", code, stderr, stdout)
+	}
+	for _, want := range []string{"\x1b[", "tasks", "id", "Fix, login"} {
+		if !strings.Contains(stdout, want) {
+			t.Errorf("human tasks missing %q:\n%s", want, stdout)
+		}
+	}
+
+	code, stdout, stderr = runCLI(provider, "", nil, "--format=human", "help")
+	if code != 0 || stderr != "" || !strings.Contains(stdout, "Options:") || !strings.Contains(stdout, "human|json|toon") {
+		t.Fatalf("human help code=%d stderr=%q stdout=%q", code, stderr, stdout)
+	}
+
+	code, stdout, stderr = runCLI(provider, "", nil, "--format", "human", "unknown")
+	if code != 2 || stderr != "" || !strings.Contains(stdout, "\x1b[33m") || !strings.Contains(stdout, "Usage:") {
+		t.Fatalf("human error code=%d stderr=%q stdout=%q", code, stderr, stdout)
+	}
+}
+
+func TestFormatValidationAndExplicitJSON(t *testing.T) {
+	provider := &fakeProvider{tasks: []project.Task{sampleTask()}}
+	code, stdout, stderr := runCLI(provider, "", nil, "--format", "json", "--project", "demo", "tasks")
+	if code != 0 || stderr != "" {
+		t.Fatalf("explicit JSON code=%d stderr=%q stdout=%q", code, stderr, stdout)
+	}
+	var decoded map[string]any
+	if err := json.Unmarshal([]byte(stdout), &decoded); err != nil {
+		t.Fatalf("explicit JSON: %v\n%s", err, stdout)
+	}
+
+	code, stdout, stderr = runCLI(provider, "", nil, "--format", "yaml", "help")
+	if code != 2 || stderr != "" || !strings.Contains(stdout, "invalid --format") {
+		t.Fatalf("invalid format code=%d stderr=%q stdout=%q", code, stderr, stdout)
 	}
 }

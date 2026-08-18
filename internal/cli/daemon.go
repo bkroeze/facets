@@ -78,6 +78,10 @@ func (a *App) runTaskDaemon(ctx context.Context, stdout, stderr io.Writer, cfg r
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 	var lastEvent []byte
+	eventFormat := cfg.format
+	if !cfg.formatSet && eventFormat == "toon" {
+		eventFormat = "json"
+	}
 	for {
 		snapshot, err := a.taskDaemonPoll(ctx, provider)
 		var event any = snapshot
@@ -89,12 +93,11 @@ func (a *App) runTaskDaemon(ctx context.Context, stdout, stderr io.Writer, cfg r
 			event = taskDaemonError{Type: "error", Message: err.Error(), Retrying: true}
 		}
 
-		encoded, marshalErr := json.Marshal(event)
+		encoded, marshalErr := encodeTaskDaemonEvent(event, eventFormat)
 		if marshalErr != nil {
 			fmt.Fprintf(stderr, "facets tasks daemon: encode event: %v\n", marshalErr)
 			return 1
 		}
-		encoded = append(encoded, '\n')
 		if !bytes.Equal(encoded, lastEvent) {
 			if _, writeErr := stdout.Write(encoded); writeErr != nil {
 				fmt.Fprintf(stderr, "facets tasks daemon: write event: %v\n", writeErr)
@@ -102,12 +105,57 @@ func (a *App) runTaskDaemon(ctx context.Context, stdout, stderr io.Writer, cfg r
 			}
 			lastEvent = append(lastEvent[:0], encoded...)
 		}
-
 		select {
 		case <-ctx.Done():
 			return 0
 		case <-ticker.C:
 		}
+	}
+}
+
+func encodeTaskDaemonEvent(event any, format string) ([]byte, error) {
+	if format == "json" {
+		encoded, err := json.Marshal(event)
+		if err != nil {
+			return nil, err
+		}
+		return append(encoded, '\n'), nil
+	}
+	var encoded bytes.Buffer
+	if err := writeDocument(&encoded, format, taskDaemonDocument(event)); err != nil {
+		return nil, err
+	}
+	return encoded.Bytes(), nil
+}
+
+func taskDaemonDocument(event any) object {
+	switch event := event.(type) {
+	case taskDaemonSnapshot:
+		projects := make(objectArray, len(event.Projects))
+		for i, project := range event.Projects {
+			tasks := make(objectArray, len(project.Tasks))
+			for j, task := range project.Tasks {
+				tasks[j] = object{
+					{name: "id", value: task.ID},
+					{name: "title", value: task.Title},
+					{name: "status", value: task.Status},
+					{name: "priority", value: priorityValue(task.Priority)},
+					{name: "assignee", value: task.Assignee},
+					{name: "updated_at", value: task.UpdatedAt},
+				}
+			}
+			projects[i] = object{
+				{name: "id", value: project.ID},
+				{name: "name", value: project.Name},
+				{name: "directory", value: project.Directory},
+				{name: "tasks", value: tasks},
+			}
+		}
+		return object{{name: "type", value: event.Type}, {name: "projects", value: projects}}
+	case taskDaemonError:
+		return object{{name: "type", value: event.Type}, {name: "message", value: event.Message}, {name: "retrying", value: event.Retrying}}
+	default:
+		return object{{name: "event", value: fmt.Sprint(event)}}
 	}
 }
 

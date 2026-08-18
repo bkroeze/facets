@@ -277,3 +277,29 @@ func TestTaskDaemonHelpIntervalAndWriteFailure(t *testing.T) {
 		t.Fatalf("write failure stderr = %q", stderr.String())
 	}
 }
+func TestTaskDaemonExplicitFormats(t *testing.T) {
+	priority := 2
+	event := taskDaemonSnapshot{
+		Type: "snapshot",
+		Projects: []taskDaemonProject{{
+			ID: "demo", Name: "Demo", Directory: "/tmp/demo",
+			Tasks: []taskDaemonTask{{ID: "T-1", Title: "Fix login", Status: "open", Priority: &priority}},
+		}},
+	}
+	human, err := encodeTaskDaemonEvent(event, "human")
+	if err != nil || !strings.Contains(string(human), "\x1b[") || !strings.Contains(string(human), "Fix login") {
+		t.Fatalf("human event err=%v output=%q", err, human)
+	}
+	toon, err := encodeTaskDaemonEvent(event, "toon")
+	if err != nil || !strings.Contains(string(toon), "projects[1]:") || !strings.Contains(string(toon), "Fix login") {
+		t.Fatalf("TOON event err=%v output=%q", err, toon)
+	}
+	jsonEvent, err := encodeTaskDaemonEvent(event, "json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var decoded taskDaemonSnapshot
+	if err := json.Unmarshal(jsonEvent, &decoded); err != nil || decoded.Projects[0].Tasks[0].ID != "T-1" {
+		t.Fatalf("JSON event err=%v output=%q decoded=%#v", err, jsonEvent, decoded)
+	}
+}

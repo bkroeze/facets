@@ -7,7 +7,7 @@ func topHelp() object {
 		table{columns: []string{"name", "default", "description"}, rows: [][]any{
 			{"--project <id>", "discovered", "project ID"},
 			{"--provider <name>", "kata", "task provider"},
-			{"--format <toon|json>", "toon", "stdout format"},
+			{"--format <human|json|toon>", "toon", "stdout format; human is terminal text with ANSI colors"},
 			{"--json", "false", "alias for --format json"},
 		}},
 		primitiveArray{"facets", "facets --project thornwear tasks", "facets --json projects list", "facets focus \"Plan the day\"", "facets serve --addr :8080"},
@@ -53,7 +53,7 @@ func tasksListHelp() object {
 func taskDaemonHelp() object {
 	return helpDocument(
 		"facets tasks daemon [--interval <duration>]",
-		"Stream newline-delimited JSON events for UI consumers; this command always writes JSON regardless of the global output format",
+		"Stream events for UI consumers; default output is newline-delimited JSON, while --format can select human, JSON, or TOON",
 		table{columns: []string{"name", "default", "description"}, rows: [][]any{
 			{"--interval <duration>", "2s", "provider polling interval from 250ms through 5m"},
 			{"snapshot event", "", `{"type":"snapshot","projects":[{"id","name","directory","tasks":[{"id","title","status","priority","assignee","updated_at"}]}]}`},
@@ -128,7 +128,7 @@ func projectsHelp() object {
 		primitiveArray{"facets projects list", "facets projects list --all", "facets projects show thornwear", "facets projects disable thornwear", "facets projects enable thornwear"}, nil)
 }
 func projectsListHelp() object {
-	return helpDocument("facets projects list [--all]", "List projects available from the selected provider", table{columns: []string{"name", "default", "description"}, rows: [][]any{{"--all", "false", "include disabled projects at the end"}}}, primitiveArray{"facets projects list", "facets projects list --all", "facets --json projects list"}, nil)
+	return helpDocument("facets projects list [--all]", "List projects available from the selected provider", table{columns: []string{"name", "default", "description"}, rows: [][]any{{"--all", "false", "include disabled projects at the end"}}}, primitiveArray{"facets projects list", "facets projects list --all", "facets --format json projects list"}, nil)
 }
 func projectSetHelp() object {
 	return helpDocument("facets projects set <id> directory=<path>", "Set local metadata for a discovered project",

@@ -66,7 +66,7 @@ Global flags must appear before the command:
 | --- | --- | --- |
 | `--project <id>` | discovered | Select a project explicitly. |
 | `--provider <name>` | `kata` | Select a task provider. |
-| `--format <toon\|json>` | `toon` | Set the stdout format. |
+| `--format <human\|json\|toon>` | `toon` | Set the stdout format. `human` renders clean terminal text with ANSI colors. |
 | `--json` | false | Alias for `--format json`. |
 
 ## Task commands
@@ -141,7 +141,8 @@ facets tasks comment --help
 ### Task snapshot daemon
 
 `facets tasks daemon` is a foreground process for UI consumers. It writes one
-newline-delimited JSON event per line regardless of the global output format:
+newline-delimited JSON event per line by default. Pass the global `--format`
+flag before the command to select human or TOON output instead.
 
 ```sh
 facets tasks daemon
@@ -451,8 +452,8 @@ omarchy restart waybar
 
 ### Troubleshooting
 
-- Run `facets tasks daemon --interval 5s` directly. Stdout must contain only
-  JSON events; provider and registry diagnostics appear on stderr.
+- Run `facets tasks daemon --interval 5s` directly. By default, stdout must
+  contain only JSON events; provider and registry diagnostics appear on stderr.
 - Run `quickshell --path quickshell/facets` from the checkout to keep QML,
   process, and parser errors in the foreground.
 - Run `quickshell ipc --config facets show` to list the `facets` target and
@@ -516,11 +517,12 @@ MagicDNS, see [`docs/tailnet.md`](docs/tailnet.md). The deployment keeps local
 
 ## Output and errors
 
-Command results are written to stdout as [TOON](https://toonformat.dev/) by default. Use `--json` when another program needs JSON:
+Command results are written to stdout as [TOON](https://toonformat.dev/) by default. Use `--format human` for terminal-oriented text with ANSI colors, or `--format json` when another program needs JSON:
 
 ```sh
-facets --json tasks --status all
+facets --format human tasks --status all
 facets --format json projects show facets
+facets --format toon tasks --status all
 ```
 
 Usage and operational failures also produce structured documents on stdout. Exit codes are:
