@@ -141,7 +141,7 @@ func TestTaskDaemonInitialSnapshotOrderingFilteringAndCancellation(t *testing.T)
 	projects := []project.Project{{ID: "zeta", Name: "Zeta"}, {ID: "alpha", Name: "Alpha"}}
 	provider := newMutableDaemonProvider(projects, map[string][]project.Task{
 		"alpha": {
-			{ID: "T-2", ProjectID: "alpha", Title: "Beta", Status: project.StatusOpen, Priority: &priority, Assignee: "bruce", UpdatedAt: time.Date(2026, 8, 10, 12, 0, 0, 123, time.UTC)},
+			{ID: "T-2", ProjectID: "alpha", Title: "Beta", Status: project.StatusOpen, Priority: &priority, Assignee: "bruce", Metadata: map[string]any{"facets.top": "true"}, UpdatedAt: time.Date(2026, 8, 10, 12, 0, 0, 123, time.UTC)},
 			{ID: "T-1", ProjectID: "alpha", Title: "Alpha", Status: project.StatusOpen},
 			{ID: "T-0", ProjectID: "alpha", Title: "Closed", Status: project.StatusClosed},
 		},
@@ -171,7 +171,7 @@ func TestTaskDaemonInitialSnapshotOrderingFilteringAndCancellation(t *testing.T)
 	if len(alpha.Tasks) != 2 || alpha.Tasks[0].ID != "T-1" || alpha.Tasks[1].ID != "T-2" {
 		t.Fatalf("open task order = %#v", alpha.Tasks)
 	}
-	if alpha.Tasks[1].UpdatedAt != "2026-08-10T12:00:00.000000123Z" || alpha.Tasks[1].Priority == nil || *alpha.Tasks[1].Priority != priority {
+	if alpha.Tasks[1].UpdatedAt != "2026-08-10T12:00:00.000000123Z" || alpha.Tasks[1].Priority == nil || *alpha.Tasks[1].Priority != priority || !alpha.Tasks[1].Top {
 		t.Fatalf("task fields = %#v", alpha.Tasks[1])
 	}
 	provider.mu.Lock()

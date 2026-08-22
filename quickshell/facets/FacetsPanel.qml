@@ -59,6 +59,7 @@ Item {
     property string taskActionStderr: ""
     property string taskActionError: ""
     property string taskActionNotice: ""
+    property bool taskActionTopValue: false
 
     function isTask(value) {
         return value !== null
@@ -68,7 +69,8 @@ Item {
             && typeof value.status === "string"
             && (value.priority === null || typeof value.priority === "number")
             && typeof value.assignee === "string"
-            && typeof value.updated_at === "string";
+            && typeof value.updated_at === "string"
+            && typeof value.top === "boolean";
     }
 
     function isProject(value) {
@@ -187,6 +189,30 @@ Item {
         taskActionNotice = "";
         taskActionText.text = "";
         taskActionDialog.open();
+    }
+
+    function toggleTopTask(projectId, task) {
+        if (taskActionBusy || taskActionDialog.opened)
+            return;
+
+        taskActionKind = "top";
+        taskActionProjectId = projectId;
+        taskActionId = task.id;
+        taskActionTitle = task.title;
+        taskActionTopValue = !task.top;
+        taskActionError = "";
+        taskActionNotice = "";
+        taskActionStdout = "";
+        taskActionStderr = "";
+        taskActionBusy = true;
+        taskActionProcess.command = [
+            "facets",
+            "--project", projectId,
+            "--format", "json",
+            "tasks", "top", task.id,
+            "--set", taskActionTopValue ? "true" : "false"
+        ];
+        taskActionProcess.running = true;
     }
 
     function actionFailureMessage(exitCode, exitStatus) {
@@ -407,11 +433,17 @@ Item {
                 return;
             }
 
-            shell.taskActionNotice = shell.taskActionKind === "comment"
-                ? "Comment added to " + shell.taskActionId + "."
-                : "Closed " + shell.taskActionId + ".";
+            if (shell.taskActionKind === "top") {
+                shell.taskActionNotice = shell.taskActionTopValue
+                    ? "Marked " + shell.taskActionId + " as a top task."
+                    : "Removed " + shell.taskActionId + " from top tasks.";
+            } else {
+                shell.taskActionNotice = shell.taskActionKind === "comment"
+                    ? "Comment added to " + shell.taskActionId + "."
+                    : "Closed " + shell.taskActionId + ".";
+                taskActionDialog.close();
+            }
             shell.taskActionError = "";
-            taskActionDialog.close();
         }
     }
 
@@ -822,6 +854,51 @@ Item {
                                                         color: "#747f90"
                                                         font.pixelSize: 9
                                                         elide: Text.ElideRight
+                                                    }
+
+                                                    CheckBox {
+                                                        id: topTaskCheck
+                                                        Layout.preferredWidth: 42
+                                                        Layout.preferredHeight: 28
+                                                        enabled: !shell.taskActionBusy && !taskActionDialog.opened
+                                                        checked: taskRow.modelData.top
+                                                        text: "Top"
+                                                        Accessible.name: (checked ? "Remove " : "Mark ") + "top-task status for " + taskRow.modelData.id
+                                                        Accessible.description: "Persist whether this task appears in today's focus list"
+                                                        onClicked: shell.toggleTopTask(projectCard.modelData.id, taskRow.modelData)
+
+                                                        ToolTip.visible: hovered
+                                                        ToolTip.delay: 400
+                                                        ToolTip.text: checked ? "Remove from top tasks" : "Mark as top task"
+
+                                                        indicator: Rectangle {
+                                                            x: 0
+                                                            y: (topTaskCheck.height - height) / 2
+                                                            width: 16
+                                                            height: 16
+                                                            radius: 4
+                                                            color: topTaskCheck.checked ? shell.actionAccent : shell.actionSurface
+                                                            border.width: 1
+                                                            border.color: topTaskCheck.checked
+                                                                ? shell.actionAccent
+                                                                : shell.actionBorder
+
+                                                            Text {
+                                                                anchors.centerIn: parent
+                                                                text: topTaskCheck.checked ? "✓" : ""
+                                                                color: "#ffffff"
+                                                                font.pixelSize: 11
+                                                                font.weight: Font.DemiBold
+                                                            }
+                                                        }
+
+                                                        contentItem: Text {
+                                                            leftPadding: 22
+                                                            text: topTaskCheck.text
+                                                            color: topTaskCheck.enabled ? shell.actionText : shell.actionMutedText
+                                                            font.pixelSize: 9
+                                                            verticalAlignment: Text.AlignVCenter
+                                                        }
                                                     }
 
                                                     Button {

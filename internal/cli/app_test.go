@@ -537,6 +537,15 @@ func TestTaskMutationsBuildProviderNeutralInputs(t *testing.T) {
 		t.Fatalf("clear priority code=%d patch=%#v: %s", code, provider.patch, stdout)
 	}
 
+	code, stdout, _ = runCLI(provider, "", nil, append(base, "tasks", "top", "T-1", "--set", "true")...)
+	if code != 0 || provider.patch.Metadata["facets.top"] != "true" {
+		t.Fatalf("set top code=%d patch=%#v: %s", code, provider.patch, stdout)
+	}
+	code, stdout, _ = runCLI(provider, "", nil, append(base, "tasks", "top", "T-1", "--set", "false")...)
+	if code != 0 || provider.patch.Metadata["facets.top"] != "false" {
+		t.Fatalf("clear top code=%d patch=%#v: %s", code, provider.patch, stdout)
+	}
+
 	code, stdout, _ = runCLI(provider, "", nil, append(base, "tasks", "close", "T-1", "--message", "Done", "--evidence", "test:go test ./...", "--evidence", "pr:https://example.test/pull/42")...)
 	if code != 0 {
 		t.Fatalf("close code=%d: %s", code, stdout)
@@ -614,7 +623,7 @@ func TestMutationValidationDoesNotCallProvider(t *testing.T) {
 	cases := [][]string{
 		{"--project", "demo", "tasks", "create", ""},
 		{"--project", "demo", "tasks", "edit", "T-1"},
-		{"--project", "demo", "tasks", "close", "T-1", "--evidence", "test:go test ./..."},
+		{"--project", "demo", "tasks", "top", "T-1"},
 		{"--project", "demo", "tasks", "close", "T-1", "--message", "done"},
 		{"--project", "demo", "tasks", "close", "T-1", "--message", "done", "--evidence", "test:focused", "--comment", " "},
 		{"--project", "demo", "tasks", "comment", "", "--body", "context"},
@@ -641,7 +650,7 @@ func TestInvalidTaskInvocationsDoNotRequireProject(t *testing.T) {
 		{"tasks", "show"},
 		{"tasks", "create", ""},
 		{"tasks", "edit", "T-1"},
-		{"tasks", "close", "T-1", "--message", "done"},
+		{"tasks", "top", "T-1"},
 		{"tasks", "comment", "T-1"},
 		{"tasks", "reopen", "T-1", "extra"},
 		{"tasks", "delete", "T-1"},

@@ -41,6 +41,7 @@ type taskDaemonTask struct {
 	Priority  *int   `json:"priority"`
 	Assignee  string `json:"assignee"`
 	UpdatedAt string `json:"updated_at"`
+	Top       bool   `json:"top"`
 }
 
 // taskDaemonError is recoverable. Consumers should retain their last valid
@@ -142,6 +143,7 @@ func taskDaemonDocument(event any) object {
 					{name: "priority", value: priorityValue(task.Priority)},
 					{name: "assignee", value: task.Assignee},
 					{name: "updated_at", value: task.UpdatedAt},
+					{name: "top", value: task.Top},
 				}
 			}
 			projects[i] = object{
@@ -225,6 +227,7 @@ func (a *App) taskDaemonPoll(ctx context.Context, provider project.Provider) (ta
 				Priority:  task.Priority,
 				Assignee:  task.Assignee,
 				UpdatedAt: updatedAt,
+				Top:       isTopTask(task),
 			})
 		}
 		snapshot.Projects = append(snapshot.Projects, daemonProject)

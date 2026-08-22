@@ -259,7 +259,7 @@ func (a *App) runTasks(ctx context.Context, stdout, stderr io.Writer, cfg runCon
 	command := "list"
 	if len(args) > 0 {
 		switch args[0] {
-		case "list", "show", "create", "edit", "close", "comment", "reopen", "delete", "daemon":
+		case "list", "show", "create", "edit", "top", "close", "comment", "reopen", "delete", "daemon":
 			command = args[0]
 			args = args[1:]
 		default:
@@ -279,6 +279,8 @@ func (a *App) runTasks(ctx context.Context, stdout, stderr io.Writer, cfg runCon
 			a.write(stdout, cfg.format, taskCreateHelp())
 		case "edit":
 			a.write(stdout, cfg.format, taskEditHelp())
+		case "top":
+			a.write(stdout, cfg.format, taskTopHelp())
 		case "close":
 			a.write(stdout, cfg.format, taskCloseHelp())
 		case "comment":
@@ -301,6 +303,8 @@ func (a *App) runTasks(ctx context.Context, stdout, stderr io.Writer, cfg runCon
 		return a.createTask(ctx, stdout, stderr, cfg, args)
 	case "edit":
 		return a.editTask(ctx, stdout, stderr, cfg, args)
+	case "top":
+		return a.setTopTask(ctx, stdout, stderr, cfg, args)
 	case "close":
 		return a.closeTask(ctx, stdout, stderr, cfg, args)
 	case "comment":
@@ -520,6 +524,37 @@ func (a *App) editTask(ctx context.Context, stdout, stderr io.Writer, cfg runCon
 	updated, err := provider.UpdateTask(ctx, projectID, id, patch)
 	if err != nil {
 		return a.providerError(stdout, stderr, cfg.format, fmt.Sprintf("could not edit task %q", id), err, fmt.Sprintf("Review values with `%s edit %s --help`", taskCommand, shellQuote(id)))
+	}
+	a.write(stdout, cfg.format, taskDocument(updated, true, taskCommand))
+	return 0
+}
+
+func (a *App) setTopTask(ctx context.Context, stdout, stderr io.Writer, cfg runConfig, args []string) int {
+	usageCommand := a.taskUsageCommand(cfg) + " top"
+	if missingRequiredArg(args) {
+		a.usageError(stdout, cfg.format, "task ID is required", fmt.Sprintf("Run `%s <id> --set true|false`", usageCommand))
+		return 2
+	}
+	id := strings.TrimSpace(args[0])
+	fs := commandFlags(usageCommand)
+	var value string
+	fs.StringVar(&value, "set", "", "set facets.top to true or false")
+	if code := a.parseFlags(stdout, cfg.format, fs, args[1:], taskTopHelp()); code >= 0 {
+		return code
+	}
+	if value != "true" && value != "false" {
+		a.usageError(stdout, cfg.format, "--set must be true or false", fmt.Sprintf("Run `%s %s --set true|false`", usageCommand, shellQuote(id)))
+		return 2
+	}
+	provider, projectID, taskCommand, code := a.taskDependencies(ctx, stdout, stderr, cfg)
+	if code != 0 {
+		return code
+	}
+	updated, err := provider.UpdateTask(ctx, projectID, id, project.TaskPatch{
+		Metadata: map[string]any{"facets.top": value},
+	})
+	if err != nil {
+		return a.providerError(stdout, stderr, cfg.format, fmt.Sprintf("could not update top-task state for %q", id), err, fmt.Sprintf("Retry `%s %s --set %s`", taskCommand, shellQuote(id), value))
 	}
 	a.write(stdout, cfg.format, taskDocument(updated, true, taskCommand))
 	return 0

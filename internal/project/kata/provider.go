@@ -228,8 +228,8 @@ func (p *Provider) UpdateTask(ctx context.Context, projectID, id string, patch p
 	if err != nil {
 		return project.Task{}, err
 	}
-	if patch.Metadata != nil {
-		return project.Task{}, fmt.Errorf("%w: Kata task edit does not replace metadata", project.ErrUnsupported)
+	if patch.Metadata != nil && len(patch.Metadata) == 0 {
+		return project.Task{}, fmt.Errorf("%w: empty task metadata replacement", project.ErrUnsupported)
 	}
 	if patch.Completion != nil && (patch.Status == nil || *patch.Status != project.StatusClosed) {
 		return project.Task{}, errors.New("kata: completion is valid only when closing a task")
@@ -301,23 +301,81 @@ func (p *Provider) UpdateTask(ctx context.Context, projectID, id string, patch p
 		editArgs = append(editArgs, "--owner", *patch.Assignee)
 		hasEdit = true
 	}
-	if !hasEdit && patch.Status == nil {
+	hasMetadata := len(patch.Metadata) > 0
+	if !hasEdit && patch.Status == nil && !hasMetadata {
 		return project.Task{}, errors.New("kata: task patch must contain a change")
 	}
 
 	var response issueResponse
+	hasResponse := false
 	if hasEdit {
 		if err := p.runJSON(ctx, editArgs, &response); err != nil {
 			return project.Task{}, err
 		}
+		hasResponse = true
 	}
-	if patch.Status == nil {
-		return mapIssue(response.Issue, projectID)
+	if patch.Status != nil {
+		if err := p.runJSON(ctx, statusArgs, &response); err != nil {
+			return project.Task{}, err
+		}
+		hasResponse = true
 	}
-	if err := p.runJSON(ctx, statusArgs, &response); err != nil {
-		return project.Task{}, err
+	if hasMetadata {
+		response, err = p.updateTaskMetadata(ctx, projectID, id, patch.Metadata)
+		if err != nil {
+			return project.Task{}, err
+		}
+		hasResponse = true
+	}
+	if !hasResponse {
+		return project.Task{}, errors.New("kata: task patch must contain a change")
 	}
 	return mapIssue(response.Issue, projectID)
+}
+
+func (p *Provider) updateTaskMetadata(ctx context.Context, projectID, id string, metadata map[string]any) (issueResponse, error) {
+	keys := make([]string, 0, len(metadata))
+	for key := range metadata {
+		if strings.TrimSpace(key) == "" {
+			return issueResponse{}, errors.New("kata: task metadata key is required")
+		}
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+
+	var response issueResponse
+	for _, key := range keys {
+		value := metadata[key]
+		args := []string{"meta", "set", id, key}
+		if value == nil {
+			args = []string{"meta", "unset", id, key}
+		} else {
+			encoded, jsonValue, err := encodeMetadataValue(value)
+			if err != nil {
+				return issueResponse{}, fmt.Errorf("kata: encode task metadata %q: %w", key, err)
+			}
+			args = append(args, encoded)
+			if jsonValue {
+				args = append(args, "--json-value")
+			}
+		}
+		args = append(args, "--project", projectID)
+		if err := p.runJSON(ctx, args, &response); err != nil {
+			return issueResponse{}, err
+		}
+	}
+	return response, nil
+}
+
+func encodeMetadataValue(value any) (string, bool, error) {
+	if text, ok := value.(string); ok {
+		return text, false, nil
+	}
+	encoded, err := json.Marshal(value)
+	if err != nil {
+		return "", false, err
+	}
+	return string(encoded), true, nil
 }
 func (p *Provider) CommentTask(ctx context.Context, projectID, id, body string) (project.Task, error) {
 	projectID, err := required("project ID", projectID)

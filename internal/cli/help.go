@@ -36,17 +36,18 @@ func focusHelp() object {
 
 func tasksHelp() object {
 	return helpDocument(
-		"facets tasks [list|show|create|edit|close|comment|reopen|delete|daemon]",
+		"facets tasks [list|show|create|edit|top|close|comment|reopen|delete|daemon]",
 		"List defaults to open tasks when no task command is supplied",
 		table{columns: []string{"command", "required", "description"}, rows: [][]any{
 			{"list", "", "list tasks"}, {"show", "<id>", "show one task"},
 			{"create", "<title>", "create a task"}, {"edit", "<id> and an edit flag", "update task fields"},
+			{"top", "<id>, --set <true|false>", "persist whether a task is a top task"},
 			{"close", "<id>, --message, --evidence <type:value>", "close with completion context"},
 			{"comment", "<id>, --body <text>", "append a task comment"},
 			{"reopen", "<id>", "reopen a task"}, {"delete", "<id>, --confirm <id>", "delete without prompting"},
 			{"daemon", "", "stream project and open-task snapshots as NDJSON"},
 		}},
-		primitiveArray{"facets tasks", "facets tasks show T-123", "facets tasks create \"Fix login\" --priority 2"}, nil,
+		primitiveArray{"facets tasks", "facets tasks show T-123", "facets tasks top T-123 --set true"}, nil,
 	)
 }
 
@@ -66,7 +67,7 @@ func taskDaemonHelp() object {
 		"Stream events for UI consumers; default output is newline-delimited JSON, while --format can select human, JSON, or TOON",
 		table{columns: []string{"name", "default", "description"}, rows: [][]any{
 			{"--interval <duration>", "2s", "provider polling interval from 250ms through 5m"},
-			{"snapshot event", "", `{"type":"snapshot","projects":[{"id","name","directory","tasks":[{"id","title","status","priority","assignee","updated_at"}]}]}`},
+			{"snapshot event", "", `{"type":"snapshot","projects":[{"id","name","directory","tasks":[{"id","title","status","priority","assignee","updated_at","top"}]}]}`},
 			{"error event", "", `{"type":"error","message":"...","retrying":true}; retain the last valid snapshot`},
 		}},
 		primitiveArray{"facets tasks daemon", "facets tasks daemon --interval 5s"}, nil,
@@ -96,6 +97,13 @@ func taskEditHelp() object {
 			{"--priority <0..4|->", "unchanged", "replacement priority; - clears"},
 			{"--assignee <name>", "unchanged", "replacement assignee; empty clears"},
 		}}, primitiveArray{"facets tasks edit T-123 --title \"New title\"", "facets tasks edit T-123 --priority -", "facets tasks edit T-123 --body \"\" --assignee \"\""}, nil)
+}
+
+func taskTopHelp() object {
+	return helpDocument("facets tasks top <id> --set <true|false>", "Persist whether a task is included in today's top-task list",
+		table{columns: []string{"name", "default", "description"}, rows: [][]any{
+			{"<id>", "required", "task ID"}, {"--set <true|false>", "required", "store facets.top as a string boolean"},
+		}}, primitiveArray{"facets tasks top T-123 --set true", "facets tasks top T-123 --set false"}, nil)
 }
 
 func taskCloseHelp() object {

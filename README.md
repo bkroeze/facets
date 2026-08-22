@@ -224,6 +224,9 @@ Facets has a shared Quickshell panel in
 [`quickshell/facets/FacetsPanel.qml`](quickshell/facets/FacetsPanel.qml):
 It shows active Facets projects, expands each project into its open Kata tasks,
 and opens a floating Kata TUI in the selected project directory.
+Each open task has a `Top` checkbox. Toggling it persists the provider metadata
+`facets.top` as the string `"true"` or `"false"`, which controls whether the
+task appears in today's top-task list.
 
 - Omarchy Quattro loads it as a first-class panel plugin inside the existing
   `omarchy-shell` process.

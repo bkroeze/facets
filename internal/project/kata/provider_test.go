@@ -354,6 +354,39 @@ func TestUpdateTaskClosePassesOptionalComment(t *testing.T) {
 	runner.done()
 }
 
+func TestUpdateTaskMetadataSetAndUnset(t *testing.T) {
+	setIssue := strings.Replace(openIssue, `"native.key": "native-value"`, `"facets.top": "true", "native.key": "native-value"`, 1)
+	falseIssue := strings.Replace(setIssue, `"facets.top": "true"`, `"facets.top": "false"`, 1)
+	runner := &scriptedRunner{t: t, steps: []scriptStep{
+		step([]string{"meta", "set", "op21", "facets.top", "true", "--project", "alpha"}, issueEnvelope(setIssue)),
+		step([]string{"meta", "set", "op21", "facets.top", "false", "--project", "alpha"}, issueEnvelope(falseIssue)),
+		step([]string{"meta", "unset", "op21", "facets.top", "--project", "alpha"}, issueEnvelope(openIssue)),
+	}}
+	provider := New(Config{Binary: "/test/kata", Actor: "robot", Runner: runner})
+
+	for _, value := range []string{"true", "false"} {
+		updated, err := provider.UpdateTask(context.Background(), "alpha", "op21", project.TaskPatch{
+			Metadata: map[string]any{"facets.top": value},
+		})
+		if err != nil {
+			t.Fatalf("set facets.top=%s: %v", value, err)
+		}
+		if updated.Metadata["facets.top"] != value {
+			t.Fatalf("set facets.top=%s metadata = %#v", value, updated.Metadata)
+		}
+	}
+	updated, err := provider.UpdateTask(context.Background(), "alpha", "op21", project.TaskPatch{
+		Metadata: map[string]any{"facets.top": nil},
+	})
+	if err != nil {
+		t.Fatalf("unset facets.top: %v", err)
+	}
+	if _, ok := updated.Metadata["facets.top"]; ok {
+		t.Fatalf("unset facets.top metadata = %#v", updated.Metadata)
+	}
+	runner.done()
+}
+
 func TestCommentTaskCommandAndMapping(t *testing.T) {
 	runner := &scriptedRunner{t: t, steps: []scriptStep{
 		step([]string{"comment", "op21", "--project", "alpha", "--body", "Follow-up context"}, issueEnvelope(openIssue)),
@@ -674,10 +707,6 @@ func TestValidationRejectsInvalidInputBeforeCommands(t *testing.T) {
 		}},
 		{"close with empty comment", func(p *Provider) error {
 			_, err := p.UpdateTask(context.Background(), "alpha", "op21", project.TaskPatch{Status: &closed, Completion: &project.Completion{Message: "done", Evidence: []string{"test:x"}, Comment: " "}})
-			return err
-		}},
-		{"update task metadata", func(p *Provider) error {
-			_, err := p.UpdateTask(context.Background(), "alpha", "op21", project.TaskPatch{Metadata: map[string]any{"key": "value"}})
 			return err
 		}},
 		{"update task empty metadata replacement", func(p *Provider) error {
