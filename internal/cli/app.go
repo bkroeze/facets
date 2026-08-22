@@ -200,6 +200,10 @@ func (a *App) runHome(ctx context.Context, stdout, stderr io.Writer, cfg runConf
 }
 
 func (a *App) runFocus(ctx context.Context, stdout, stderr io.Writer, cfg runConfig, args []string) int {
+	if len(args) == 1 && args[0] == "show" {
+		return a.showFocus(ctx, stdout, stderr, cfg)
+	}
+
 	usageCommand := "facets focus"
 	if len(args) == 1 && isHelp(args[0]) {
 		a.write(stdout, cfg.format, focusHelp())
@@ -221,6 +225,28 @@ func (a *App) runFocus(ctx context.Context, stdout, stderr io.Writer, cfg runCon
 		{name: "day_start", value: formatTime(created.DayStart)},
 		{name: "created_at", value: formatTime(created.CreatedAt)},
 		{name: "message", value: "Today's focus saved"},
+	})
+	return 0
+}
+
+func (a *App) showFocus(ctx context.Context, stdout, stderr io.Writer, cfg runConfig) int {
+	if a.ProjectStore == nil {
+		return a.providerError(stdout, stderr, cfg.format, "could not load today's focus", errors.New("local project registry is not configured"), "Configure the local Facets database and retry")
+	}
+
+	focus, err := a.ProjectStore.CurrentDayFocus(ctx, time.Now())
+	if errors.Is(err, store.ErrNotFound) {
+		a.write(stdout, cfg.format, object{{name: "focus", value: nil}})
+		return 0
+	}
+	if err != nil {
+		return a.providerError(stdout, stderr, cfg.format, "could not load today's focus", err, "Retry `facets focus show`")
+	}
+	a.write(stdout, cfg.format, object{
+		{name: "focus", value: object{
+			{name: "text", value: focus.Focus},
+			{name: "day_start", value: formatTime(focus.DayStart)},
+		}},
 	})
 	return 0
 }

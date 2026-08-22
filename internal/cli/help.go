@@ -25,11 +25,12 @@ func todayHelp() object {
 		primitiveArray{"facets today", "facets focus \"Plan the day\""}, nil)
 }
 func focusHelp() object {
-	return helpDocument("facets focus <text>", "Save today's focus without prompting",
-		table{columns: []string{"name", "default", "description"}, rows: [][]any{
-			{"<text>", "required", "focus text for today; quote text containing spaces"},
+	return helpDocument("facets focus <text>|show", "Save or read today's focus",
+		table{columns: []string{"command", "required", "description"}, rows: [][]any{
+			{"<text>", "yes", "focus text for today; quote text containing spaces"},
+			{"show", "no", "read today's focus without querying the task provider"},
 		}},
-		primitiveArray{"facets focus \"Plan the day\""}, nil,
+		primitiveArray{"facets focus \"Plan the day\"", "facets --format json focus show"}, nil,
 	)
 }
 

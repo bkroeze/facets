@@ -93,9 +93,10 @@ install-quattro:
       GOBIN="$bin_dir" go install ./cmd/facets; \
       install -m 0644 quickshell/facets/manifest.json "$plugin_dir/manifest.json"; \
       install -m 0644 quickshell/facets/FacetsPanel.qml "$plugin_dir/FacetsPanel.qml"; \
+      install -m 0644 quickshell/facets/FacetsBarWidget.qml "$plugin_dir/FacetsBarWidget.qml"; \
       printf 'Installed facets to %s and Quattro plugin to %s\n' \
         "$bin_dir/facets" "$plugin_dir"; \
-      printf 'Run: omarchy-shell shell rescanPlugins && omarchy plugin enable facets\n'
+      printf 'Run: omarchy-shell shell rescanPlugins && omarchy plugin enable facets --section center && omarchy-restart-shell\n'
 
 # Run formatting, tests, static analysis, and a build.
 check: fmt-check test vet build

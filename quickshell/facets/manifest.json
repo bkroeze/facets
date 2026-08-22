@@ -6,10 +6,19 @@
   "author": "Facets",
   "description": "Project and task dashboard",
   "kinds": [
-    "panel"
+    "panel",
+    "bar-widget"
   ],
   "keepLoaded": true,
   "entryPoints": {
-    "panel": "FacetsPanel.qml"
+    "panel": "FacetsPanel.qml",
+    "barWidget": "FacetsBarWidget.qml"
+  },
+  "barWidget": {
+    "displayName": "Facets",
+    "description": "Toggle the Facets project panel and show today's focus",
+    "category": "Productivity",
+    "defaultSection": "center",
+    "allowMultiple": false
   }
 }

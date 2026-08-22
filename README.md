@@ -166,6 +166,14 @@ facets focus "Plan the day"
 `facets focus` requires one non-empty argument and stores the focus with the
 current local-day boundary. `facets focus --help` shows the command contract.
 
+Read the current focus without querying the task provider:
+
+```sh
+facets --format json focus show
+```
+
+This returns `{"focus":null}` when no focus is set for the current local day.
+
 Show the current focus, open `facets.top=true` tasks, and completion counts:
 
 ```sh
@@ -267,16 +275,32 @@ From the Facets checkout:
 ```sh
 just install-quattro
 omarchy-shell shell rescanPlugins
-omarchy plugin enable facets
+omarchy plugin enable facets --section center
 omarchy-restart-shell
 ```
 
 `install-quattro` installs the `facets` binary to `~/.local/bin/facets` and
-copies the plugin manifest and QML panel to `~/.config/omarchy/plugins/facets`.
-The standard Omarchy session imports `~/.local/bin` on its PATH. It does not
-replace `shell.json` or enable unreviewed code. `omarchy plugin enable facets`
-records the plugin in `~/.config/omarchy/shell.json`; Quattro then loads it in
-the existing shell process.
+copies the plugin manifest, panel, and bar widget to
+`~/.config/omarchy/plugins/facets`. The manifest declares the bar widget's
+default section as `center`; `--section center` makes that placement explicit.
+`omarchy plugin enable facets --section center` records the widget in
+`~/.config/omarchy/shell.json`; Quattro then loads it in the existing shell
+process.
+
+If an older installation has `facets` only in the top-level `plugins` list,
+disable it once before enabling it with the center placement:
+
+```sh
+omarchy plugin disable facets
+omarchy plugin enable facets --section center
+```
+
+The center widget uses
+`$XDG_DATA_HOME/facets/facets.svg` (falling back to
+`$HOME/.local/share/facets/facets.svg`) and toggles the Facets panel when
+clicked. When today's focus is set with `facets focus "<text>"`, the widget
+shows that focus beside the icon, truncated to 40 characters with an ellipsis.
+It refreshes the focus title every 30 seconds.
 
 Use Quattro's shell IPC as the launcher:
 
@@ -290,16 +314,10 @@ The `toggle` call opens the Facets panel when hidden and closes it when shown.
 The shell IPC command is required for Quattro; do not add a second
 `quickshell --config` autostart entry.
 
-To add a Hyprland binding, merge this line into
-`~/.config/hypr/bindings.conf` after checking that the key is unused:
-
-```ini
-bindd = SUPER SHIFT, F, Facets project tasks, exec, omarchy-shell shell toggle facets
-```
-
 To update the Quattro plugin, pull the new checkout, rerun
 `go install ./cmd/facets` and `just install-quattro`, then run
-`omarchy-shell shell rescanPlugins` and `omarchy-restart-shell`.
+`omarchy-shell shell rescanPlugins` and `omarchy plugin enable facets --section center`
+followed by `omarchy-restart-shell`.
 
 To uninstall a checkout-installed plugin:
 

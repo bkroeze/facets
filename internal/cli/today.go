@@ -27,8 +27,9 @@ type completionMetrics struct {
 	Top      int
 }
 
-// listTopTasks returns open tasks marked with the exact boolean metadata value
-// facets.top=true. Missing or malformed metadata is ignored.
+// listTopTasks returns open tasks marked with facets.top=true. Providers may
+// decode metadata booleans as either bool or the string "true"; missing or
+// malformed metadata is ignored.
 func listTopTasks(ctx context.Context, provider project.Provider) ([]topTask, error) {
 	projects, err := provider.ListProjects(ctx)
 	if err != nil {
@@ -65,8 +66,17 @@ func listTopTasks(ctx context.Context, provider project.Provider) ([]topTask, er
 
 func isTopTask(task project.Task) bool {
 	value, ok := task.Metadata["facets.top"]
-	top, ok := value.(bool)
-	return ok && top
+	if !ok {
+		return false
+	}
+	switch top := value.(type) {
+	case bool:
+		return top
+	case string:
+		return strings.EqualFold(strings.TrimSpace(top), "true")
+	default:
+		return false
+	}
 }
 
 // completedToday counts closed tasks whose UpdatedAt falls within the local

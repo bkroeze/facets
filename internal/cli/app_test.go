@@ -164,7 +164,7 @@ func TestNoArgsShowsHomeAndOpenTasks(t *testing.T) {
 	}
 }
 
-func TestFocusCommandPersistsAndValidates(t *testing.T) {
+func TestFocusCommandPersistsAndShows(t *testing.T) {
 	ctx := context.Background()
 	registry, err := store.Open(ctx, filepath.Join(t.TempDir(), "facets.db"))
 	if err != nil {
@@ -174,8 +174,12 @@ func TestFocusCommandPersistsAndValidates(t *testing.T) {
 
 	var stdout, stderr bytes.Buffer
 	app := App{ProjectStore: registry, Stdout: &stdout, Stderr: &stderr, Env: map[string]string{}}
-	if code := app.Run(ctx, []string{"focus", "--help"}); code != 0 || !strings.Contains(stdout.String(), "facets focus <text>") {
+	if code := app.Run(ctx, []string{"focus", "--help"}); code != 0 || !strings.Contains(stdout.String(), "facets focus <text>|show") {
 		t.Fatalf("focus help code=%d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+	}
+	stdout.Reset()
+	if code := app.Run(ctx, []string{"--format", "json", "focus", "show"}); code != 0 || stdout.String() != "{\"focus\":null}\n" {
+		t.Fatalf("missing focus show code=%d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
 	}
 	stdout.Reset()
 	if code := app.Run(ctx, []string{"focus"}); code != 2 || !strings.Contains(stdout.String(), "focus text is required") {
@@ -188,6 +192,10 @@ func TestFocusCommandPersistsAndValidates(t *testing.T) {
 	stdout.Reset()
 	if code := app.Run(ctx, []string{"focus", "Plan the day"}); code != 0 || !strings.Contains(stdout.String(), "Today's focus saved") {
 		t.Fatalf("save focus code=%d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+	}
+	stdout.Reset()
+	if code := app.Run(ctx, []string{"--format", "json", "focus", "show"}); code != 0 || stdout.String() == "" || !strings.Contains(stdout.String(), "\"text\":\"Plan the day\"") {
+		t.Fatalf("saved focus show code=%d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
 	}
 	current, err := registry.CurrentDayFocus(ctx, time.Now())
 	if err != nil || current.Focus != "Plan the day" {
@@ -248,7 +256,7 @@ func TestTodayCommandPromptsInteractivelyAndReportsSummary(t *testing.T) {
 	}
 }
 
-func TestListTopTasksAcrossProjectsFiltersMetadataAndStatus(t *testing.T) {
+func TestListTopTasksAcrossProjectsAcceptsProviderBooleanStrings(t *testing.T) {
 	now := time.Date(2026, 8, 16, 12, 0, 0, 0, time.UTC)
 	provider := &fakeProvider{
 		projects: []project.Project{{ID: "beta", Name: "Beta"}, {ID: "alpha", Name: "Alpha"}},
@@ -261,6 +269,7 @@ func TestListTopTasksAcrossProjectsFiltersMetadataAndStatus(t *testing.T) {
 			"beta": {
 				{ID: "missing", ProjectID: "beta", Title: "Missing beta", Status: project.StatusOpen, UpdatedAt: now},
 				{ID: "false", ProjectID: "beta", Title: "False beta", Status: project.StatusOpen, Metadata: map[string]any{"facets.top": false}, UpdatedAt: now},
+				{ID: "string-false", ProjectID: "beta", Title: "String false beta", Status: project.StatusOpen, Metadata: map[string]any{"facets.top": "false"}, UpdatedAt: now},
 			},
 		},
 	}
@@ -268,7 +277,7 @@ func TestListTopTasksAcrossProjectsFiltersMetadataAndStatus(t *testing.T) {
 	if err != nil {
 		t.Fatalf("listTopTasks() error = %v", err)
 	}
-	if len(tasks) != 1 || tasks[0].Project.ID != "alpha" || tasks[0].Task.ID != "top" || tasks[0].Task.Title != "Top alpha" {
+	if len(tasks) != 2 || tasks[0].Project.ID != "alpha" || tasks[0].Task.ID != "string" || tasks[1].Task.ID != "top" {
 		t.Fatalf("listTopTasks() = %#v", tasks)
 	}
 	if provider.listFilter.Status == nil || *provider.listFilter.Status != project.StatusOpen {
