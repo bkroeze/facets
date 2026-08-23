@@ -3,7 +3,6 @@ package project
 import (
 	"errors"
 	"fmt"
-	"reflect"
 	"sort"
 	"strings"
 	"sync"
@@ -22,7 +21,7 @@ func NewRegistry() *Registry {
 
 // Register adds provider. Provider names are case-sensitive and must not be empty.
 func (r *Registry) Register(provider Provider) error {
-	if provider == nil || isNilProvider(provider) {
+	if provider == nil || isNilInterface(provider) {
 		return errors.New("project: provider is required")
 	}
 	name := provider.Name()
@@ -40,16 +39,6 @@ func (r *Registry) Register(provider Provider) error {
 	}
 	r.providers[name] = provider
 	return nil
-}
-
-func isNilProvider(provider Provider) bool {
-	value := reflect.ValueOf(provider)
-	switch value.Kind() {
-	case reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Pointer, reflect.Slice:
-		return value.IsNil()
-	default:
-		return false
-	}
 }
 
 // Provider returns the registered provider with name.

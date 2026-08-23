@@ -3,7 +3,6 @@ package project
 import (
 	"context"
 	"fmt"
-	"reflect"
 	"sort"
 	"strings"
 )
@@ -20,7 +19,7 @@ type Service struct {
 // NewService constructs an application service for provider. A single optional
 // saved-view store enables persisted view operations.
 func NewService(provider Provider, stores ...SavedViewStore) (*Service, error) {
-	if provider == nil || isNilProvider(provider) {
+	if provider == nil || isNilInterface(provider) {
 		return nil, fmt.Errorf("project service: provider is required")
 	}
 	if len(stores) > 1 {
@@ -28,22 +27,12 @@ func NewService(provider Provider, stores ...SavedViewStore) (*Service, error) {
 	}
 	service := &Service{provider: provider}
 	if len(stores) == 1 {
-		if stores[0] == nil || isNilSavedViewStore(stores[0]) {
+		if stores[0] == nil || isNilInterface(stores[0]) {
 			return nil, fmt.Errorf("project service: saved-view store is required")
 		}
 		service.viewStore = stores[0]
 	}
 	return service, nil
-}
-
-func isNilSavedViewStore(store SavedViewStore) bool {
-	value := reflect.ValueOf(store)
-	switch value.Kind() {
-	case reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Pointer, reflect.Slice:
-		return value.IsNil()
-	default:
-		return false
-	}
 }
 
 // ListProjects returns projects in a stable display order.
