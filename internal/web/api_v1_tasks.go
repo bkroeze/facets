@@ -36,11 +36,7 @@ func (s *server) apiV1Tasks(w http.ResponseWriter, r *http.Request) {
 			s.respondAPIServiceError(w, r, err)
 			return
 		}
-		out := apiV1TasksResponse{Tasks: make([]apiV1Task, len(tasks))}
-		for i, t := range tasks {
-			out.Tasks[i] = apiV1TaskFromDomain(t)
-		}
-		s.writeAPIJSON(w, r, 200, out)
+		s.writeAPIJSON(w, r, 200, apiV1TasksResponse{Tasks: apiV1TasksFromDomain(tasks)})
 		return
 	}
 	var req apiV1CreateTaskRequest
