@@ -177,7 +177,11 @@ func (a *App) taskDaemonPoll(ctx context.Context, provider project.Provider) (ta
 		return taskDaemonSnapshot{}, fmt.Errorf("sync project registry: %w", err)
 	}
 
-	activeProjects := make([]project.Project, 0, len(projects))
+	type activeProject struct {
+		item      project.Project
+		directory string
+	}
+	activeProjects := make([]activeProject, 0, len(projects))
 	for _, item := range projects {
 		registered, err := a.ProjectStore.RegisteredProject(ctx, provider.Name(), item.ID)
 		if err != nil {
@@ -186,16 +190,14 @@ func (a *App) taskDaemonPoll(ctx context.Context, provider project.Provider) (ta
 		if registered.DisabledAt != nil {
 			continue
 		}
-		activeProjects = append(activeProjects, item)
+		directory, _ := registered.Metadata["directory"].(string)
+		activeProjects = append(activeProjects, activeProject{item: item, directory: directory})
 	}
 
 	snapshot := taskDaemonSnapshot{Type: "snapshot", Projects: make([]taskDaemonProject, 0, len(activeProjects))}
 	open := project.StatusOpen
-	for _, item := range activeProjects {
-		registered, err := a.ProjectStore.RegisteredProject(ctx, provider.Name(), item.ID)
-		if err != nil {
-			return taskDaemonSnapshot{}, fmt.Errorf("read project %q metadata: %w", item.ID, err)
-		}
+	for _, active := range activeProjects {
+		item := active.item
 		tasks, err := provider.ListTasks(ctx, item.ID, project.TaskFilter{Status: &open})
 		if err != nil {
 			return taskDaemonSnapshot{}, fmt.Errorf("list tasks for project %q: %w", item.ID, err)
@@ -208,11 +210,10 @@ func (a *App) taskDaemonPoll(ctx context.Context, provider project.Provider) (ta
 			return left < right
 		})
 
-		directory, _ := registered.Metadata["directory"].(string)
 		daemonProject := taskDaemonProject{
 			ID:        item.ID,
 			Name:      item.Name,
-			Directory: directory,
+			Directory: active.directory,
 			Tasks:     make([]taskDaemonTask, 0, len(tasks)),
 		}
 		for _, task := range tasks {
