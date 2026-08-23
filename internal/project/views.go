@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -285,13 +286,13 @@ func cleanTaskOrder(order TaskOrder) (TaskOrder, error) {
 }
 
 func matchesTaskQuery(task Task, query TaskQuery) bool {
-	if len(query.Statuses) > 0 && !containsStatus(query.Statuses, task.Status) {
+	if len(query.Statuses) > 0 && !slices.Contains(query.Statuses, task.Status) {
 		return false
 	}
-	if len(query.Assignees) > 0 && !containsString(query.Assignees, task.Assignee) {
+	if len(query.Assignees) > 0 && !slices.Contains(query.Assignees, task.Assignee) {
 		return false
 	}
-	if len(query.Priorities) > 0 && (task.Priority == nil || !containsInt(query.Priorities, *task.Priority)) {
+	if len(query.Priorities) > 0 && (task.Priority == nil || !slices.Contains(query.Priorities, *task.Priority)) {
 		return false
 	}
 	return true
@@ -361,33 +362,6 @@ func compareTimes(left, right time.Time) int {
 		return 1
 	}
 	return -1
-}
-
-func containsStatus(values []Status, candidate Status) bool {
-	for _, value := range values {
-		if value == candidate {
-			return true
-		}
-	}
-	return false
-}
-
-func containsString(values []string, candidate string) bool {
-	for _, value := range values {
-		if value == candidate {
-			return true
-		}
-	}
-	return false
-}
-
-func containsInt(values []int, candidate int) bool {
-	for _, value := range values {
-		if value == candidate {
-			return true
-		}
-	}
-	return false
 }
 
 func newSavedViewID() (string, error) {
