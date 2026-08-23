@@ -197,12 +197,7 @@ func (s *server) apiV1Task(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *server) apiV1CommentTask(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		w.Header().Set("Allow", "POST")
-		s.respondAPIError(w, r, 405, "method_not_allowed", "This endpoint accepts only POST requests.", nil, nil)
-		return
-	}
-	s.apiV1TaskMutation(w, r, func(r *http.Request, pid, tid string) (project.Task, error) {
+	s.apiV1PostTaskMutation(w, r, func(r *http.Request, pid, tid string) (project.Task, error) {
 		var req apiV1CommentTaskRequest
 		if err := decodeAPIJSON(r, &req); err != nil {
 			return project.Task{}, err
@@ -210,13 +205,9 @@ func (s *server) apiV1CommentTask(w http.ResponseWriter, r *http.Request) {
 		return s.service.CommentTask(r.Context(), pid, tid, req.Body)
 	})
 }
+
 func (s *server) apiV1CloseTask(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		w.Header().Set("Allow", "POST")
-		s.respondAPIError(w, r, 405, "method_not_allowed", "This endpoint accepts only POST requests.", nil, nil)
-		return
-	}
-	s.apiV1TaskMutation(w, r, func(r *http.Request, pid, tid string) (project.Task, error) {
+	s.apiV1PostTaskMutation(w, r, func(r *http.Request, pid, tid string) (project.Task, error) {
 		var req apiV1CloseTaskRequest
 		if err := decodeAPIJSON(r, &req); err != nil {
 			return project.Task{}, err
@@ -224,17 +215,19 @@ func (s *server) apiV1CloseTask(w http.ResponseWriter, r *http.Request) {
 		return s.service.CloseTask(r.Context(), pid, tid, project.Completion{Message: req.Message, Evidence: req.Evidence, Comment: req.Comment})
 	})
 }
+
 func (s *server) apiV1ReopenTask(w http.ResponseWriter, r *http.Request) {
+	s.apiV1PostTaskMutation(w, r, func(r *http.Request, pid, tid string) (project.Task, error) {
+		return s.service.ReopenTask(r.Context(), pid, tid)
+	})
+}
+
+func (s *server) apiV1PostTaskMutation(w http.ResponseWriter, r *http.Request, mutate func(*http.Request, string, string) (project.Task, error)) {
 	if r.Method != http.MethodPost {
 		w.Header().Set("Allow", "POST")
 		s.respondAPIError(w, r, 405, "method_not_allowed", "This endpoint accepts only POST requests.", nil, nil)
 		return
 	}
-	s.apiV1TaskMutation(w, r, func(r *http.Request, pid, tid string) (project.Task, error) {
-		return s.service.ReopenTask(r.Context(), pid, tid)
-	})
-}
-func (s *server) apiV1TaskMutation(w http.ResponseWriter, r *http.Request, mutate func(*http.Request, string, string) (project.Task, error)) {
 	if s.service == nil {
 		s.respondAPIServiceError(w, r, project.ErrProviderNotFound)
 		return
