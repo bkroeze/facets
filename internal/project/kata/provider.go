@@ -334,14 +334,10 @@ func (p *Provider) UpdateTask(ctx context.Context, projectID, id string, patch p
 }
 
 func (p *Provider) updateTaskMetadata(ctx context.Context, projectID, id string, metadata map[string]any) (issueResponse, error) {
-	keys := make([]string, 0, len(metadata))
-	for key := range metadata {
-		if strings.TrimSpace(key) == "" {
-			return issueResponse{}, errors.New("kata: task metadata key is required")
-		}
-		keys = append(keys, key)
+	keys, err := sortedMetadataKeys(metadata)
+	if err != nil {
+		return issueResponse{}, err
 	}
-	sort.Strings(keys)
 
 	var response issueResponse
 	for _, key := range keys {
@@ -677,14 +673,10 @@ func validatePriority(priority int) error {
 }
 
 func metadataFlags(metadata map[string]any) ([]string, error) {
-	keys := make([]string, 0, len(metadata))
-	for key := range metadata {
-		if strings.TrimSpace(key) == "" {
-			return nil, errors.New("kata: task metadata key is required")
-		}
-		keys = append(keys, key)
+	keys, err := sortedMetadataKeys(metadata)
+	if err != nil {
+		return nil, err
 	}
-	sort.Strings(keys)
 	args := make([]string, 0, len(keys)*2)
 	for _, key := range keys {
 		value, ok := metadata[key].(string)
@@ -698,6 +690,18 @@ func metadataFlags(metadata map[string]any) ([]string, error) {
 		args = append(args, "--meta", key+"="+value)
 	}
 	return args, nil
+}
+
+func sortedMetadataKeys(metadata map[string]any) ([]string, error) {
+	keys := make([]string, 0, len(metadata))
+	for key := range metadata {
+		if strings.TrimSpace(key) == "" {
+			return nil, errors.New("kata: task metadata key is required")
+		}
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	return keys, nil
 }
 
 func commandText(binary string, args []string) string {
