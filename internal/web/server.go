@@ -201,11 +201,11 @@ func (s *server) projectDirectory(ctx context.Context, source, id string) (strin
 	if err != nil {
 		return "", err
 	}
-	directory, ok := registered.Metadata["directory"].(string)
-	if !ok || strings.TrimSpace(directory) == "" {
+	directory, ok := registered.Directory()
+	if !ok {
 		return "", nil
 	}
-	return strings.TrimSpace(directory), nil
+	return directory, nil
 }
 
 func (s *server) status(w http.ResponseWriter, r *http.Request) {

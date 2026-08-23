@@ -44,6 +44,13 @@ type RegisteredProject struct {
 	DisabledAt *time.Time
 }
 
+// Directory returns normalized directory metadata when it is a non-empty string.
+func (p RegisteredProject) Directory() (string, bool) {
+	directory, ok := p.Metadata["directory"].(string)
+	directory = strings.TrimSpace(directory)
+	return directory, ok && directory != ""
+}
+
 // DayFocus is a focus entry assigned to a user's local calendar day.
 type DayFocus struct {
 	ID        int64

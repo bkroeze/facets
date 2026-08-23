@@ -918,11 +918,10 @@ func (a *App) projectDirectory(ctx context.Context, source, id, fallback string)
 	if err != nil {
 		return "", err
 	}
-	directory, ok := registered.Metadata["directory"].(string)
-	if !ok || strings.TrimSpace(directory) == "" {
+	directory, ok := registered.Directory()
+	if !ok {
 		return "", nil
 	}
-	directory = strings.TrimSpace(directory)
 	if filepath.IsAbs(directory) {
 		return filepath.Clean(directory), nil
 	}

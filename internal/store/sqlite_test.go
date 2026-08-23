@@ -292,6 +292,30 @@ func TestProjectRegistrySyncPreservesLocalMetadata(t *testing.T) {
 	}
 }
 
+func TestRegisteredProjectDirectory(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		metadata map[string]any
+		want     string
+		wantOK   bool
+	}{
+		{name: "missing", metadata: nil},
+		{name: "non-string", metadata: map[string]any{"directory": 42}},
+		{name: "blank", metadata: map[string]any{"directory": " \t\n"}},
+		{name: "normalized", metadata: map[string]any{"directory": " /work/facets "}, want: "/work/facets", wantOK: true},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			directory, ok := (RegisteredProject{Metadata: test.metadata}).Directory()
+			if directory != test.want || ok != test.wantOK {
+				t.Fatalf("Directory() = %q, %v; want %q, %v", directory, ok, test.want, test.wantOK)
+			}
+		})
+	}
+}
+
 func TestProjectRegistryIdentityValidation(t *testing.T) {
 	t.Parallel()
 

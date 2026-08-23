@@ -92,9 +92,8 @@ func mappedProject(cwd string, projects []store.RegisteredProject) (string, bool
 		selectedRoot string
 	)
 	for _, registered := range projects {
-		directory, ok := registered.Metadata["directory"].(string)
-		directory = strings.TrimSpace(directory)
-		if !ok || directory == "" || !filepath.IsAbs(directory) {
+		directory, ok := registered.Directory()
+		if !ok || !filepath.IsAbs(directory) {
 			continue
 		}
 		root := filepath.Clean(directory)
