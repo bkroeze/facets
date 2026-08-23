@@ -6,6 +6,8 @@ import (
 	"sort"
 	"strings"
 	"sync"
+
+	"facets.barnlab.dev/internal/nilcheck"
 )
 
 // Registry stores providers by their stable name.
@@ -21,7 +23,7 @@ func NewRegistry() *Registry {
 
 // Register adds provider. Provider names are case-sensitive and must not be empty.
 func (r *Registry) Register(provider Provider) error {
-	if provider == nil || isNilInterface(provider) {
+	if nilcheck.IsNil(provider) {
 		return errors.New("project: provider is required")
 	}
 	name := provider.Name()

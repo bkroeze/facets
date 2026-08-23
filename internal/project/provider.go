@@ -4,7 +4,6 @@ package project
 import (
 	"context"
 	"errors"
-	"reflect"
 	"time"
 )
 
@@ -17,16 +16,6 @@ var (
 	ErrProviderExists   = errors.New("project: provider already registered")
 	ErrProviderNotFound = errors.New("project: provider not registered")
 )
-
-func isNilInterface(value any) bool {
-	reflected := reflect.ValueOf(value)
-	switch reflected.Kind() {
-	case reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Pointer, reflect.Slice:
-		return reflected.IsNil()
-	default:
-		return false
-	}
-}
 
 // Status is a provider-neutral task lifecycle state.
 type Status string

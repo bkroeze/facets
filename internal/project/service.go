@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+
+	"facets.barnlab.dev/internal/nilcheck"
 )
 
 // Service is the provider-neutral application boundary used by interactive and
@@ -19,7 +21,7 @@ type Service struct {
 // NewService constructs an application service for provider. A single optional
 // saved-view store enables persisted view operations.
 func NewService(provider Provider, stores ...SavedViewStore) (*Service, error) {
-	if provider == nil || isNilInterface(provider) {
+	if nilcheck.IsNil(provider) {
 		return nil, fmt.Errorf("project service: provider is required")
 	}
 	if len(stores) > 1 {
@@ -27,7 +29,7 @@ func NewService(provider Provider, stores ...SavedViewStore) (*Service, error) {
 	}
 	service := &Service{provider: provider}
 	if len(stores) == 1 {
-		if stores[0] == nil || isNilInterface(stores[0]) {
+		if nilcheck.IsNil(stores[0]) {
 			return nil, fmt.Errorf("project service: saved-view store is required")
 		}
 		service.viewStore = stores[0]
