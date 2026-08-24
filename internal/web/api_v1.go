@@ -161,6 +161,14 @@ func apiV1TaskFromDomain(item project.Task) apiV1Task {
 	}
 }
 
+func apiV1TasksFromDomain(items []project.Task) []apiV1Task {
+	tasks := make([]apiV1Task, len(items))
+	for i, item := range items {
+		tasks[i] = apiV1TaskFromDomain(item)
+	}
+	return tasks
+}
+
 func apiV1Time(value time.Time) *string {
 	if value.IsZero() {
 		return nil

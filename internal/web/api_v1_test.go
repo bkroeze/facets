@@ -65,6 +65,25 @@ func TestAPIV1RootRejectsUnsupportedMethod(t *testing.T) {
 	}
 }
 
+func TestAPIV1TaskMutationMethodsRejectBeforeDependencyLookup(t *testing.T) {
+	t.Parallel()
+
+	handler := newTestHandler(t, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	for _, path := range []string{
+		apiV1Prefix + "/projects/demo/tasks/1/comments",
+		apiV1Prefix + "/projects/demo/tasks/1/close",
+		apiV1Prefix + "/projects/demo/tasks/1/reopen",
+	} {
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, path, nil))
+
+		assertAPIError(t, response, http.StatusMethodNotAllowed, "method_not_allowed")
+		if got := response.Header().Get("Allow"); got != http.MethodPost {
+			t.Errorf("GET %s Allow = %q, want %q", path, got, http.MethodPost)
+		}
+	}
+}
+
 func TestAPIV1UnknownResourceReturnsJSONError(t *testing.T) {
 	t.Parallel()
 

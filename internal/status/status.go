@@ -10,11 +10,11 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"reflect"
 	"strconv"
 	"strings"
 	"time"
 
+	"facets.barnlab.dev/internal/nilcheck"
 	"facets.barnlab.dev/internal/project"
 	_ "modernc.org/sqlite"
 )
@@ -77,13 +77,13 @@ func (b *Builder) Build(ctx context.Context, provider project.Provider, root, pr
 	if ctx == nil {
 		return Summary{}, errors.New("status: context is required")
 	}
-	if isNil(provider) {
+	if nilcheck.IsNil(provider) {
 		return Summary{}, errors.New("status: provider is required")
 	}
 	if b == nil {
 		return Summary{}, errors.New("status: builder is required")
 	}
-	if isNil(b.Activity) {
+	if nilcheck.IsNil(b.Activity) {
 		return Summary{}, errors.New("status: activity source is required")
 	}
 	root = strings.TrimSpace(root)
@@ -155,19 +155,6 @@ func normalizeActivity(activity Activity) Activity {
 			codexSessionKey: activity.Sessions[codexSessionKey],
 			ompSessionKey:   activity.Sessions[ompSessionKey],
 		},
-	}
-}
-
-func isNil(value any) bool {
-	if value == nil {
-		return true
-	}
-	v := reflect.ValueOf(value)
-	switch v.Kind() {
-	case reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Pointer, reflect.Slice:
-		return v.IsNil()
-	default:
-		return false
 	}
 }
 

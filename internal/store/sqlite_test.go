@@ -263,14 +263,14 @@ func TestProjectRegistrySyncPreservesLocalMetadata(t *testing.T) {
 	if err := store.SyncProjects(ctx, "kata", items); err != nil {
 		t.Fatalf("SyncProjects(first) error = %v", err)
 	}
-	first, err := store.RegisteredProject(ctx, "kata", "demo")
+	first, err := store.RegisteredProject(ctx, " kata ", " demo ")
 	if err != nil {
 		t.Fatalf("RegisteredProject(first) error = %v", err)
 	}
 	if first.FirstSeen.IsZero() || first.LastSeen.IsZero() || first.Metadata["remote"] != "v1" {
 		t.Fatalf("first registry record = %#v", first)
 	}
-	updated, err := store.SetProjectMetadata(ctx, "kata", "demo", "directory", "/tmp/demo")
+	updated, err := store.SetProjectMetadata(ctx, " kata ", " demo ", " directory ", "/tmp/demo")
 	if err != nil {
 		t.Fatalf("SetProjectMetadata() error = %v", err)
 	}
@@ -292,6 +292,60 @@ func TestProjectRegistrySyncPreservesLocalMetadata(t *testing.T) {
 	}
 }
 
+func TestRegisteredProjectDirectory(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		metadata map[string]any
+		want     string
+		wantOK   bool
+	}{
+		{name: "missing", metadata: nil},
+		{name: "non-string", metadata: map[string]any{"directory": 42}},
+		{name: "blank", metadata: map[string]any{"directory": " \t\n"}},
+		{name: "normalized", metadata: map[string]any{"directory": " /work/facets "}, want: "/work/facets", wantOK: true},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			directory, ok := (RegisteredProject{Metadata: test.metadata}).Directory()
+			if directory != test.want || ok != test.wantOK {
+				t.Fatalf("Directory() = %q, %v; want %q, %v", directory, ok, test.want, test.wantOK)
+			}
+		})
+	}
+}
+
+func TestProjectRegistryIdentityValidation(t *testing.T) {
+	t.Parallel()
+
+	store := &Store{}
+	tests := []struct {
+		name string
+		run  func() error
+		want string
+	}{
+		{"registered source before ID", func() error { _, err := store.RegisteredProject(context.Background(), " ", " "); return err }, "store: project source is required"},
+		{"registered ID", func() error { _, err := store.RegisteredProject(context.Background(), "kata", " "); return err }, "store: project ID is required"},
+		{"metadata identity before key", func() error {
+			_, err := store.SetProjectMetadata(context.Background(), " ", " ", " ", "value")
+			return err
+		}, "store: project source is required"},
+		{"metadata key", func() error {
+			_, err := store.SetProjectMetadata(context.Background(), "kata", "demo", " ", "value")
+			return err
+		}, "store: project metadata key is required"},
+		{"disabled ID", func() error { _, err := store.SetProjectDisabled(context.Background(), "kata", " ", true); return err }, "store: project ID is required"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if err := test.run(); err == nil || err.Error() != test.want {
+				t.Fatalf("error = %v, want %q", err, test.want)
+			}
+		})
+	}
+}
+
 func TestProjectDisabledStatePersistsAcrossSync(t *testing.T) {
 	t.Parallel()
 
@@ -302,7 +356,7 @@ func TestProjectDisabledStatePersistsAcrossSync(t *testing.T) {
 		t.Fatalf("SyncProjects() error = %v", err)
 	}
 
-	disabled, err := store.SetProjectDisabled(ctx, "kata", "demo", true)
+	disabled, err := store.SetProjectDisabled(ctx, " kata ", " demo ", true)
 	if err != nil {
 		t.Fatalf("SetProjectDisabled(true) error = %v", err)
 	}

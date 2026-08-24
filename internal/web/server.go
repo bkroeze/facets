@@ -11,13 +11,13 @@ import (
 	"io/fs"
 	"log/slog"
 	"net/http"
-	"reflect"
 	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
+	"facets.barnlab.dev/internal/nilcheck"
 	"facets.barnlab.dev/internal/project"
 	"facets.barnlab.dev/internal/status"
 	"facets.barnlab.dev/internal/store"
@@ -45,7 +45,7 @@ func newWithRegistry(logger *slog.Logger, projects ProjectSource, registry *stor
 	if logger == nil {
 		logger = slog.Default()
 	}
-	if isNilProjectSource(projects) {
+	if nilcheck.IsNil(projects) {
 		return nil, errors.New("web: project source is required")
 	}
 	if len(providers) > 1 {
@@ -53,7 +53,7 @@ func newWithRegistry(logger *slog.Logger, projects ProjectSource, registry *stor
 	}
 	var provider project.Provider
 	if len(providers) == 1 {
-		if isNilProjectSource(providers[0]) {
+		if nilcheck.IsNil(providers[0]) {
 			return nil, errors.New("web: project provider is required")
 		}
 		provider = providers[0]
@@ -147,19 +147,6 @@ type errorData struct {
 	Message string
 }
 
-func isNilProjectSource(source ProjectSource) bool {
-	if source == nil {
-		return true
-	}
-	value := reflect.ValueOf(source)
-	switch value.Kind() {
-	case reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Pointer, reflect.Slice:
-		return value.IsNil()
-	default:
-		return false
-	}
-}
-
 func (s *server) index(w http.ResponseWriter, r *http.Request) {
 	projects, err := s.listProjects(r.Context())
 	if err != nil {
@@ -214,11 +201,11 @@ func (s *server) projectDirectory(ctx context.Context, source, id string) (strin
 	if err != nil {
 		return "", err
 	}
-	directory, ok := registered.Metadata["directory"].(string)
-	if !ok || strings.TrimSpace(directory) == "" {
+	directory, ok := registered.Directory()
+	if !ok {
 		return "", nil
 	}
-	return strings.TrimSpace(directory), nil
+	return directory, nil
 }
 
 func (s *server) status(w http.ResponseWriter, r *http.Request) {

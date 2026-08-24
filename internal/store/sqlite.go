@@ -44,6 +44,13 @@ type RegisteredProject struct {
 	DisabledAt *time.Time
 }
 
+// Directory returns normalized directory metadata when it is a non-empty string.
+func (p RegisteredProject) Directory() (string, bool) {
+	directory, ok := p.Metadata["directory"].(string)
+	directory = strings.TrimSpace(directory)
+	return directory, ok && directory != ""
+}
+
 // DayFocus is a focus entry assigned to a user's local calendar day.
 type DayFocus struct {
 	ID        int64
@@ -390,14 +397,14 @@ func (s *Store) RegisteredProjects(ctx context.Context, source string) ([]Regist
 
 // RegisteredProject returns a provider project from the local registry.
 func (s *Store) RegisteredProject(ctx context.Context, source, id string) (RegisteredProject, error) {
-	source = strings.TrimSpace(source)
-	id = strings.TrimSpace(id)
-	if source == "" {
-		return RegisteredProject{}, errors.New("store: project source is required")
+	source, id, err := cleanRegisteredProjectIdentity(source, id)
+	if err != nil {
+		return RegisteredProject{}, err
 	}
-	if id == "" {
-		return RegisteredProject{}, errors.New("store: project ID is required")
-	}
+	return s.registeredProject(ctx, source, id)
+}
+
+func (s *Store) registeredProject(ctx context.Context, source, id string) (RegisteredProject, error) {
 	return scanRegisteredProject(s.db.QueryRowContext(ctx, `
 		SELECT source, project_id, name, metadata, first_seen, last_seen, disabled_at
 		FROM project_registry
@@ -407,19 +414,15 @@ func (s *Store) RegisteredProject(ctx context.Context, source, id string) (Regis
 
 // SetProjectMetadata sets one local metadata key on a registered project.
 func (s *Store) SetProjectMetadata(ctx context.Context, source, id, key, value string) (RegisteredProject, error) {
-	source = strings.TrimSpace(source)
-	id = strings.TrimSpace(id)
+	source, id, err := cleanRegisteredProjectIdentity(source, id)
+	if err != nil {
+		return RegisteredProject{}, err
+	}
 	key = strings.TrimSpace(key)
-	if source == "" {
-		return RegisteredProject{}, errors.New("store: project source is required")
-	}
-	if id == "" {
-		return RegisteredProject{}, errors.New("store: project ID is required")
-	}
 	if key == "" {
 		return RegisteredProject{}, errors.New("store: project metadata key is required")
 	}
-	current, err := s.RegisteredProject(ctx, source, id)
+	current, err := s.registeredProject(ctx, source, id)
 	if err != nil {
 		return RegisteredProject{}, err
 	}
@@ -446,13 +449,9 @@ func (s *Store) SetProjectMetadata(ctx context.Context, source, id, key, value s
 // disable timestamp is preserved across repeated disables and cleared on
 // enable so historical registry data remains intact.
 func (s *Store) SetProjectDisabled(ctx context.Context, source, id string, disabled bool) (RegisteredProject, error) {
-	source = strings.TrimSpace(source)
-	id = strings.TrimSpace(id)
-	if source == "" {
-		return RegisteredProject{}, errors.New("store: project source is required")
-	}
-	if id == "" {
-		return RegisteredProject{}, errors.New("store: project ID is required")
+	source, id, err := cleanRegisteredProjectIdentity(source, id)
+	if err != nil {
+		return RegisteredProject{}, err
 	}
 
 	now := time.Now().UTC().UnixMilli()
@@ -463,7 +462,19 @@ func (s *Store) SetProjectDisabled(ctx context.Context, source, id string, disab
 	`, disabled, now, source, id); err != nil {
 		return RegisteredProject{}, fmt.Errorf("store: set project disabled state: %w", err)
 	}
-	return s.RegisteredProject(ctx, source, id)
+	return s.registeredProject(ctx, source, id)
+}
+
+func cleanRegisteredProjectIdentity(source, id string) (string, string, error) {
+	source = strings.TrimSpace(source)
+	id = strings.TrimSpace(id)
+	if source == "" {
+		return "", "", errors.New("store: project source is required")
+	}
+	if id == "" {
+		return "", "", errors.New("store: project ID is required")
+	}
+	return source, id, nil
 }
 
 // CreateDayFocus stores a focus entry for the local calendar day containing createdAt.

@@ -146,11 +146,7 @@ func (s *server) apiV1ExecuteView(w http.ResponseWriter, r *http.Request) {
 		s.respondAPIServiceError(w, r, err)
 		return
 	}
-	response := apiV1TasksResponse{Tasks: make([]apiV1Task, len(tasks))}
-	for i, task := range tasks {
-		response.Tasks[i] = apiV1TaskFromDomain(task)
-	}
-	s.writeAPIJSON(w, r, http.StatusOK, response)
+	s.writeAPIJSON(w, r, http.StatusOK, apiV1TasksResponse{Tasks: apiV1TasksFromDomain(tasks)})
 }
 
 func (s *server) acceptsAPIResponse(w http.ResponseWriter, r *http.Request) bool {
