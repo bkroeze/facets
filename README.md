@@ -178,6 +178,7 @@ Show the current focus, open `facets.top=true` tasks, and completion counts:
 
 ```sh
 facets today
+facets today --format json
 ```
 
 When no focus exists, an interactive terminal prompts for it and persists the

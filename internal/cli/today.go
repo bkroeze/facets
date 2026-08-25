@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"errors"
+	"flag"
 	"fmt"
 	"io"
 	"os"
@@ -115,12 +116,31 @@ func completedToday(ctx context.Context, provider project.Provider, now time.Tim
 }
 func (a *App) runToday(ctx context.Context, stdout, stderr io.Writer, cfg runConfig, args []string) int {
 	usageCommand := "facets today"
-	if len(args) == 1 && isHelp(args[0]) {
-		a.write(stdout, cfg.format, todayHelp())
-		return 0
+	fs := commandFlags(usageCommand)
+	var jsonAlias bool
+	fs.StringVar(&cfg.format, "format", cfg.format, "output format: human, json, or toon")
+	fs.BoolVar(&jsonAlias, "json", false, "alias for --format json")
+	if err := fs.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			a.write(stdout, normalizedFormat(cfg.format, jsonAlias), todayHelp())
+			return 0
+		}
+		a.usageError(stdout, normalizedFormat(cfg.format, jsonAlias), err.Error(), fmt.Sprintf("Run `%s --help`", usageCommand))
+		return 2
 	}
-	if len(args) != 0 {
-		a.usageError(stdout, cfg.format, "today does not accept arguments", fmt.Sprintf("Run `%s`", usageCommand))
+	if jsonAlias {
+		if cfg.format != "toon" && cfg.format != "json" {
+			a.usageError(stdout, "toon", "--json cannot be combined with a non-JSON --format", "Use `--format json` or omit `--format`")
+			return 2
+		}
+		cfg.format = "json"
+	}
+	if !validFormat(cfg.format) {
+		a.usageError(stdout, "toon", fmt.Sprintf("invalid --format %q", cfg.format), "Use `--format human`, `--format json`, or `--format toon`")
+		return 2
+	}
+	if fs.NArg() != 0 {
+		a.usageError(stdout, cfg.format, "today does not accept arguments", fmt.Sprintf("Run `%s --help`", usageCommand))
 		return 2
 	}
 	if a.ProjectStore == nil {

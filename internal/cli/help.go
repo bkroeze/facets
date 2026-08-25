@@ -16,13 +16,15 @@ func topHelp() object {
 }
 
 func todayHelp() object {
-	return helpDocument("facets today", "Show today's focus, top tasks, and completion counts; prompt for missing focus only on an interactive terminal",
+	return helpDocument("facets today [--format <human|json|toon>]", "Show today's focus, top tasks, and completion counts; prompt for missing focus only on an interactive terminal",
 		table{columns: []string{"name", "default", "description"}, rows: [][]any{
+			{"--format <human|json|toon>", "toon", "stdout format; human is terminal text with ANSI colors"},
+			{"--json", "false", "alias for --format json"},
 			{"focus", "prompt when interactive", "persist today's focus; non-interactive runs must set it with `facets focus`"},
 			{"top_tasks", "all open facets.top=true tasks", "show project and task identity plus titles"},
 			{"completed_today", "current local day", "count all completed tasks and top completed tasks"},
 		}},
-		primitiveArray{"facets today", "facets focus \"Plan the day\""}, nil)
+		primitiveArray{"facets today", "facets today --format json", "facets today --format human", "facets focus \"Plan the day\""}, nil)
 }
 func focusHelp() object {
 	return helpDocument("facets focus <text>|show", "Save or read today's focus",

@@ -222,14 +222,14 @@ func TestTodayCommandPromptsInteractivelyAndReportsSummary(t *testing.T) {
 
 	var stdout, stderr bytes.Buffer
 	nonInteractive := App{Provider: provider, ProjectStore: registry, Stdout: &stdout, Stderr: &stderr, Stdin: strings.NewReader("ignored\n"), Interactive: func() bool { return false }, Env: map[string]string{}}
-	if code := nonInteractive.Run(ctx, []string{"--format", "json", "today"}); code != 2 || !strings.Contains(stdout.String(), "today's focus is not set") {
+	if code := nonInteractive.Run(ctx, []string{"today", "--format", "json"}); code != 2 || !strings.Contains(stdout.String(), "today's focus is not set") {
 		t.Fatalf("non-interactive today code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
 	}
 
 	stdout.Reset()
 	stderr.Reset()
 	app := App{Provider: provider, ProjectStore: registry, Stdout: &stdout, Stderr: &stderr, Stdin: strings.NewReader("Plan the day\n"), Interactive: func() bool { return true }, Env: map[string]string{}}
-	if code := app.Run(ctx, []string{"--format", "json", "today"}); code != 0 {
+	if code := app.Run(ctx, []string{"today", "--format", "json"}); code != 0 {
 		t.Fatalf("interactive today code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
 	}
 	var decoded struct {
