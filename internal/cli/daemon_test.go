@@ -69,6 +69,7 @@ type controlledDaemonProvider struct {
 	blockFirst bool
 	blockCall  int
 	firstDelay time.Duration
+	release    <-chan struct{}
 	starts     chan time.Time
 	finishes   chan time.Time
 	calls      int
@@ -85,6 +86,7 @@ func (p *controlledDaemonProvider) ListProjects(ctx context.Context) ([]project.
 	block := p.blockFirst
 	blockCall := p.blockCall
 	delay := p.firstDelay
+	release := p.release
 	p.controlMu.Unlock()
 	defer func() {
 		if p.finishes != nil {
@@ -94,6 +96,9 @@ func (p *controlledDaemonProvider) ListProjects(ctx context.Context) ([]project.
 
 	if (call == 1 && block) || call == blockCall {
 		<-ctx.Done()
+		if release != nil {
+			<-release
+		}
 		return nil, ctx.Err()
 	}
 	if call == 1 && delay > 0 {
@@ -110,10 +115,12 @@ func (p *controlledDaemonProvider) ListProjects(ctx context.Context) ([]project.
 
 type failAfterWriter struct {
 	writes int
+	events [][]byte
 }
 
 func (w *failAfterWriter) Write(data []byte) (int, error) {
 	w.writes++
+	w.events = append(w.events, append([]byte(nil), data...))
 	if w.writes > 1 {
 		return 0, errors.New("write failed")
 	}
@@ -480,6 +487,91 @@ func TestTaskDaemonHeartbeatContinuesDuringRefresh(t *testing.T) {
 	}
 }
 
+func TestTaskDaemonHeartbeatDetectsDetachmentDuringInitialRefresh(t *testing.T) {
+	base := newMutableDaemonProvider(nil, nil)
+	finishes := make(chan time.Time, 1)
+	provider := &controlledDaemonProvider{mutableDaemonProvider: base, blockFirst: true, finishes: finishes}
+	registry := openDaemonStore(t, base)
+	writer := &failAfterWriter{}
+	var stderr bytes.Buffer
+	app := App{
+		Provider:                    provider,
+		ProjectStore:                registry,
+		Stdout:                      writer,
+		Stderr:                      &stderr,
+		TaskDaemonRefreshTimeout:    maximumTaskDaemonRefreshTimeout,
+		TaskDaemonHeartbeatInterval: 25 * time.Millisecond,
+		TaskDaemonLockPath:          filepath.Join(t.TempDir(), "daemon.lock"),
+	}
+
+	done := make(chan int, 1)
+	go func() {
+		done <- app.Run(context.Background(), []string{"tasks", "daemon"})
+	}()
+	select {
+	case code := <-done:
+		if code != 1 {
+			t.Fatalf("initial heartbeat write failure exit code = %d", code)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("heartbeat did not detect detachment during initial refresh")
+	}
+	select {
+	case <-finishes:
+	default:
+		t.Fatal("daemon exited before the initial refresh worker finished")
+	}
+	var heartbeat taskDaemonHeartbeat
+	if err := json.Unmarshal(writer.events[0], &heartbeat); err != nil || heartbeat.Type != "heartbeat" {
+		t.Fatalf("startup heartbeat err=%v event=%q", err, writer.events[0])
+	}
+	if writer.writes != 2 || !strings.Contains(stderr.String(), "write heartbeat: write failed") {
+		t.Fatalf("writes = %d, stderr = %q", writer.writes, stderr.String())
+	}
+}
+
+func TestTaskDaemonCancellationWaitsForRefreshWorker(t *testing.T) {
+	base := newMutableDaemonProvider(nil, nil)
+	release := make(chan struct{})
+	starts := make(chan time.Time, 1)
+	provider := &controlledDaemonProvider{mutableDaemonProvider: base, blockFirst: true, release: release, starts: starts}
+	registry := openDaemonStore(t, base)
+	ctx, cancel := context.WithCancel(context.Background())
+	app := App{
+		Provider:                    provider,
+		ProjectStore:                registry,
+		Stdout:                      &bytes.Buffer{},
+		Stderr:                      &bytes.Buffer{},
+		TaskDaemonHeartbeatInterval: time.Second,
+		TaskDaemonLockPath:          filepath.Join(t.TempDir(), "daemon.lock"),
+	}
+	done := make(chan int, 1)
+	go func() {
+		done <- app.Run(ctx, []string{"tasks", "daemon"})
+	}()
+	select {
+	case <-starts:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for initial refresh")
+	}
+
+	cancel()
+	select {
+	case code := <-done:
+		t.Fatalf("daemon exited with code %d before refresh cleanup", code)
+	case <-time.After(50 * time.Millisecond):
+	}
+	close(release)
+	select {
+	case code := <-done:
+		if code != 0 {
+			t.Fatalf("daemon exit code = %d", code)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("daemon did not exit after refresh cleanup")
+	}
+}
+
 func TestTaskDaemonHelpIntervalAndWriteFailure(t *testing.T) {
 	provider := newMutableDaemonProvider(nil, nil)
 	registry := openDaemonStore(t, provider)
@@ -488,7 +580,7 @@ func TestTaskDaemonHelpIntervalAndWriteFailure(t *testing.T) {
 	if code := app.Run(context.Background(), []string{"tasks", "daemon", "--help"}); code != 0 {
 		t.Fatalf("help code = %d", code)
 	}
-	for _, want := range []string{"newline-delimited JSON", "snapshot event", "error event", "--interval <duration>", "--refresh-timeout <duration>"} {
+	for _, want := range []string{"newline-delimited JSON", "snapshot event", "error event", "heartbeat event", "--interval <duration>", "--refresh-timeout <duration>"} {
 		if !strings.Contains(stdout.String(), want) {
 			t.Errorf("help missing %q:\n%s", want, stdout.String())
 		}
@@ -543,5 +635,9 @@ func TestTaskDaemonExplicitFormats(t *testing.T) {
 	var decoded taskDaemonSnapshot
 	if err := json.Unmarshal(jsonEvent, &decoded); err != nil || decoded.Projects[0].Tasks[0].ID != "T-1" {
 		t.Fatalf("JSON event err=%v output=%q decoded=%#v", err, jsonEvent, decoded)
+	}
+	heartbeat, err := encodeTaskDaemonEvent(taskDaemonHeartbeat{Type: "heartbeat"}, "toon")
+	if err != nil || string(heartbeat) != "type: \"heartbeat\"\n" {
+		t.Fatalf("TOON heartbeat err=%v output=%q", err, heartbeat)
 	}
 }

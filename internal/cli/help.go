@@ -72,6 +72,7 @@ func taskDaemonHelp() object {
 			{"--refresh-timeout <duration>", "10s", "maximum duration of one provider refresh, from 250ms through 5m"},
 			{"snapshot event", "", `{"type":"snapshot","projects":[{"id","name","directory","tasks":[{"id","title","status","priority","assignee","updated_at","top"}]}]}`},
 			{"error event", "", `{"type":"error","message":"...","retrying":true}; retain the last valid snapshot`},
+			{"heartbeat event", "", `{"type":"heartbeat"}; may precede the first snapshot and carries no state`},
 		}},
 		primitiveArray{"facets tasks daemon", "facets tasks daemon --interval 5s", "facets tasks daemon --refresh-timeout 30s"}, nil,
 	)

@@ -58,6 +58,10 @@ type taskDaemonError struct {
 	Retrying bool   `json:"retrying"`
 }
 
+type taskDaemonHeartbeat struct {
+	Type string `json:"type"`
+}
+
 type taskDaemonPollResult struct {
 	snapshot taskDaemonSnapshot
 	err      error
@@ -114,6 +118,11 @@ func (a *App) runTaskDaemon(ctx context.Context, stdout, stderr io.Writer, cfg r
 	if !cfg.formatSet && eventFormat == "toon" {
 		eventFormat = "json"
 	}
+	startupHeartbeat, err := encodeTaskDaemonEvent(taskDaemonHeartbeat{Type: "heartbeat"}, eventFormat)
+	if err != nil {
+		fmt.Fprintf(stderr, "facets tasks daemon: encode heartbeat: %v\n", err)
+		return 1
+	}
 	for {
 		refreshCtx, cancel := context.WithTimeout(ctx, refreshTimeout)
 		refreshDone := make(chan taskDaemonPollResult, 1)
@@ -128,16 +137,19 @@ func (a *App) runTaskDaemon(ctx context.Context, stdout, stderr io.Writer, cfg r
 			select {
 			case <-ctx.Done():
 				cancel()
+				<-refreshDone
 				return 0
 			case result = <-refreshDone:
 				cancel()
 				break refresh
 			case <-heartbeat.C:
-				if len(lastEvent) == 0 {
-					continue
+				heartbeatEvent := lastEvent
+				if len(heartbeatEvent) == 0 {
+					heartbeatEvent = startupHeartbeat
 				}
-				if _, writeErr := stdout.Write(lastEvent); writeErr != nil {
+				if _, writeErr := stdout.Write(heartbeatEvent); writeErr != nil {
 					cancel()
+					<-refreshDone
 					fmt.Fprintf(stderr, "facets tasks daemon: write heartbeat: %v\n", writeErr)
 					return 1
 				}
@@ -256,6 +268,8 @@ func taskDaemonDocument(event any) object {
 		return object{{name: "type", value: event.Type}, {name: "projects", value: projects}}
 	case taskDaemonError:
 		return object{{name: "type", value: event.Type}, {name: "message", value: event.Message}, {name: "retrying", value: event.Retrying}}
+	case taskDaemonHeartbeat:
+		return object{{name: "type", value: event.Type}}
 	default:
 		return object{{name: "event", value: fmt.Sprint(event)}}
 	}

@@ -153,7 +153,8 @@ Only one task daemon runs per user. Each provider refresh is canceled after 10
 seconds by default, and the next refresh waits for the configured interval
 after the prior one finishes. The daemon periodically repeats its latest event
 so a detached stdout consumer is detected and the singleton lock is released.
-A `snapshot` event replaces the prior project tree. An `error` event is
+A state-free `heartbeat` event may appear before the first provider result. A
+`snapshot` event replaces the prior project tree. An `error` event is
 recoverable; consumers should retain the last valid snapshot while the daemon
 retries. Runtime diagnostics go to stderr, never into the stdout protocol. Run
 `facets tasks daemon --help` for the complete event fields and timing limits.

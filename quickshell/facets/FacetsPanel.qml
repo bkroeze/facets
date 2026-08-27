@@ -137,6 +137,8 @@ Item {
             refreshError = event.message;
             return;
         }
+        if (event.type === "heartbeat")
+            return;
 
         loading = false;
         parseError = "Unsupported daemon event: " + event.type;
