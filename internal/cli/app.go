@@ -26,20 +26,23 @@ var errProjectNotDiscovered = errors.New("project not discovered")
 // for a single-provider embedding; Registry is used when more than one provider
 // is available.
 type App struct {
-	Registry           *project.Registry
-	Provider           project.Provider
-	Summary            *status.Builder
-	ProjectStore       *store.Store
-	Stdout             io.Writer
-	Stderr             io.Writer
-	Stdin              io.Reader
-	Interactive        func() bool
-	Cwd                string
-	Env                map[string]string
-	Getenv             func(string) string
-	Executable         string
-	Serve              func(context.Context, string) error
-	TaskDaemonInterval time.Duration
+	Registry                    *project.Registry
+	Provider                    project.Provider
+	Summary                     *status.Builder
+	ProjectStore                *store.Store
+	Stdout                      io.Writer
+	Stderr                      io.Writer
+	Stdin                       io.Reader
+	Interactive                 func() bool
+	Cwd                         string
+	Env                         map[string]string
+	Getenv                      func(string) string
+	Executable                  string
+	Serve                       func(context.Context, string) error
+	TaskDaemonInterval          time.Duration
+	TaskDaemonRefreshTimeout    time.Duration
+	TaskDaemonHeartbeatInterval time.Duration
+	TaskDaemonLockPath          string
 }
 
 type runConfig struct {

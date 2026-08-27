@@ -7,17 +7,23 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"sort"
 	"strings"
 	"time"
 
 	"facets.barnlab.dev/internal/project"
+	"golang.org/x/sys/unix"
 )
 
 const (
-	defaultTaskDaemonInterval = 2 * time.Second
-	minimumTaskDaemonInterval = 250 * time.Millisecond
-	maximumTaskDaemonInterval = 5 * time.Minute
+	defaultTaskDaemonInterval          = 2 * time.Second
+	defaultTaskDaemonRefreshTimeout    = 10 * time.Second
+	defaultTaskDaemonHeartbeatInterval = 10 * time.Second
+	minimumTaskDaemonInterval          = 250 * time.Millisecond
+	maximumTaskDaemonInterval          = 5 * time.Minute
+	minimumTaskDaemonRefreshTimeout    = 250 * time.Millisecond
+	maximumTaskDaemonRefreshTimeout    = 5 * time.Minute
 )
 
 // taskDaemonSnapshot is the stable newline-delimited JSON contract consumed by
@@ -58,12 +64,25 @@ func (a *App) runTaskDaemon(ctx context.Context, stdout, stderr io.Writer, cfg r
 	if a.TaskDaemonInterval > 0 {
 		interval = a.TaskDaemonInterval
 	}
-	fs.DurationVar(&interval, "interval", interval, "provider polling interval")
+	refreshTimeout := defaultTaskDaemonRefreshTimeout
+	if a.TaskDaemonRefreshTimeout > 0 {
+		refreshTimeout = a.TaskDaemonRefreshTimeout
+	}
+	heartbeatInterval := defaultTaskDaemonHeartbeatInterval
+	if a.TaskDaemonHeartbeatInterval > 0 {
+		heartbeatInterval = a.TaskDaemonHeartbeatInterval
+	}
+	fs.DurationVar(&interval, "interval", interval, "delay between completed provider refreshes")
+	fs.DurationVar(&refreshTimeout, "refresh-timeout", refreshTimeout, "maximum duration of one provider refresh")
 	if code := a.parseFlags(stdout, cfg.format, fs, args, taskDaemonHelp()); code >= 0 {
 		return code
 	}
 	if interval < minimumTaskDaemonInterval || interval > maximumTaskDaemonInterval {
 		a.usageError(stdout, cfg.format, "--interval must be between 250ms and 5m", fmt.Sprintf("Use `%s daemon --interval 2s`", a.taskUsageCommand(cfg)))
+		return 2
+	}
+	if refreshTimeout < minimumTaskDaemonRefreshTimeout || refreshTimeout > maximumTaskDaemonRefreshTimeout {
+		a.usageError(stdout, cfg.format, "--refresh-timeout must be between 250ms and 5m", fmt.Sprintf("Use `%s daemon --refresh-timeout 10s`", a.taskUsageCommand(cfg)))
 		return 2
 	}
 	if a.ProjectStore == nil {
@@ -75,23 +94,37 @@ func (a *App) runTaskDaemon(ctx context.Context, stdout, stderr io.Writer, cfg r
 	if code != 0 {
 		return code
 	}
+	lock, err := a.acquireTaskDaemonLock()
+	if err != nil {
+		fmt.Fprintf(stderr, "facets tasks daemon: %v\n", err)
+		return 1
+	}
+	defer lock.Close()
 
-	ticker := time.NewTicker(interval)
-	defer ticker.Stop()
+	timer := time.NewTimer(time.Hour)
+	if !timer.Stop() {
+		<-timer.C
+	}
+	defer timer.Stop()
+
 	var lastEvent []byte
+	var lastWrite time.Time
 	eventFormat := cfg.format
 	if !cfg.formatSet && eventFormat == "toon" {
 		eventFormat = "json"
 	}
 	for {
-		snapshot, err := a.taskDaemonPoll(ctx, provider)
+		refreshCtx, cancel := context.WithTimeout(ctx, refreshTimeout)
+		snapshot, refreshErr := a.taskDaemonPoll(refreshCtx, provider)
+		cancel()
+
 		var event any = snapshot
-		if err != nil {
-			if errors.Is(err, context.Canceled) || errors.Is(ctx.Err(), context.Canceled) {
+		if refreshErr != nil {
+			if errors.Is(refreshErr, context.Canceled) || errors.Is(ctx.Err(), context.Canceled) {
 				return 0
 			}
-			fmt.Fprintf(stderr, "facets tasks daemon: refresh failed: %v\n", err)
-			event = taskDaemonError{Type: "error", Message: err.Error(), Retrying: true}
+			fmt.Fprintf(stderr, "facets tasks daemon: refresh failed: %v\n", refreshErr)
+			event = taskDaemonError{Type: "error", Message: refreshErr.Error(), Retrying: true}
 		}
 
 		encoded, marshalErr := encodeTaskDaemonEvent(event, eventFormat)
@@ -99,19 +132,71 @@ func (a *App) runTaskDaemon(ctx context.Context, stdout, stderr io.Writer, cfg r
 			fmt.Fprintf(stderr, "facets tasks daemon: encode event: %v\n", marshalErr)
 			return 1
 		}
+		now := time.Now()
 		if !bytes.Equal(encoded, lastEvent) {
 			if _, writeErr := stdout.Write(encoded); writeErr != nil {
 				fmt.Fprintf(stderr, "facets tasks daemon: write event: %v\n", writeErr)
 				return 1
 			}
 			lastEvent = append(lastEvent[:0], encoded...)
+			lastWrite = now
 		}
-		select {
-		case <-ctx.Done():
-			return 0
-		case <-ticker.C:
+
+		nextPoll := now.Add(interval)
+		nextHeartbeat := lastWrite.Add(heartbeatInterval)
+		for {
+			wakeAt := nextPoll
+			if nextHeartbeat.Before(wakeAt) {
+				wakeAt = nextHeartbeat
+			}
+			delay := time.Until(wakeAt)
+			if delay < 0 {
+				delay = 0
+			}
+			timer.Reset(delay)
+			select {
+			case <-ctx.Done():
+				return 0
+			case <-timer.C:
+			}
+
+			now = time.Now()
+			if !now.Before(nextHeartbeat) {
+				if _, writeErr := stdout.Write(lastEvent); writeErr != nil {
+					fmt.Fprintf(stderr, "facets tasks daemon: write heartbeat: %v\n", writeErr)
+					return 1
+				}
+				lastWrite = now
+				nextHeartbeat = now.Add(heartbeatInterval)
+			}
+			if !now.Before(nextPoll) {
+				break
+			}
 		}
 	}
+}
+
+func (a *App) taskDaemonLockFile() string {
+	if a.TaskDaemonLockPath != "" {
+		return a.TaskDaemonLockPath
+	}
+	return fmt.Sprintf("/run/user/%d/facets-tasks-daemon.lock", os.Getuid())
+}
+
+func (a *App) acquireTaskDaemonLock() (*os.File, error) {
+	lockPath := a.taskDaemonLockFile()
+	lock, err := os.OpenFile(lockPath, os.O_CREATE|os.O_RDWR, 0o600)
+	if err != nil {
+		return nil, fmt.Errorf("open singleton lock: %w", err)
+	}
+	if err := unix.Flock(int(lock.Fd()), unix.LOCK_EX|unix.LOCK_NB); err != nil {
+		_ = lock.Close()
+		if errors.Is(err, unix.EWOULDBLOCK) || errors.Is(err, unix.EAGAIN) {
+			return nil, errors.New("another tasks daemon is already running")
+		}
+		return nil, fmt.Errorf("acquire singleton lock: %w", err)
+	}
+	return lock, nil
 }
 
 func encodeTaskDaemonEvent(event any, format string) ([]byte, error) {

@@ -327,11 +327,13 @@ Item {
         }
 
         onStarted: {
+            restartTimer.stop();
             shell.disconnected = false;
             shell.daemonStderr = "";
         }
 
         onExited: (exitCode, exitStatus) => {
+            daemon.running = false;
             shell.loading = false;
             shell.disconnected = true;
             shell.restartAttempt = Math.min(shell.restartAttempt + 1, 4);
@@ -447,7 +449,15 @@ Item {
         }
     }
 
-    Component.onCompleted: daemon.running = true
+    Component.onCompleted: {
+        restartTimer.stop();
+        daemon.running = true;
+    }
+
+    Component.onDestruction: {
+        restartTimer.stop();
+        daemon.running = false;
+    }
 
     PanelWindow {
         id: panel

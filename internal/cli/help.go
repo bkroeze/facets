@@ -65,14 +65,15 @@ func tasksListHelp() object {
 
 func taskDaemonHelp() object {
 	return helpDocument(
-		"facets tasks daemon [--interval <duration>]",
-		"Stream events for UI consumers; default output is newline-delimited JSON, while --format can select human, JSON, or TOON",
+		"facets tasks daemon [--interval <duration>] [--refresh-timeout <duration>]",
+		"Stream events for UI consumers; one daemon may run per user, and default output is newline-delimited JSON",
 		table{columns: []string{"name", "default", "description"}, rows: [][]any{
-			{"--interval <duration>", "2s", "provider polling interval from 250ms through 5m"},
+			{"--interval <duration>", "2s", "delay after each completed refresh, from 250ms through 5m"},
+			{"--refresh-timeout <duration>", "10s", "maximum duration of one provider refresh, from 250ms through 5m"},
 			{"snapshot event", "", `{"type":"snapshot","projects":[{"id","name","directory","tasks":[{"id","title","status","priority","assignee","updated_at","top"}]}]}`},
 			{"error event", "", `{"type":"error","message":"...","retrying":true}; retain the last valid snapshot`},
 		}},
-		primitiveArray{"facets tasks daemon", "facets tasks daemon --interval 5s"}, nil,
+		primitiveArray{"facets tasks daemon", "facets tasks daemon --interval 5s", "facets tasks daemon --refresh-timeout 30s"}, nil,
 	)
 }
 

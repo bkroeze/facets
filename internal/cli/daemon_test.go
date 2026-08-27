@@ -63,6 +63,61 @@ func (p *mutableDaemonProvider) setState(tasks map[string][]project.Task, err er
 	p.err = err
 }
 
+type controlledDaemonProvider struct {
+	*mutableDaemonProvider
+	controlMu  sync.Mutex
+	blockFirst bool
+	firstDelay time.Duration
+	starts     chan time.Time
+	finishes   chan time.Time
+	calls      int
+}
+
+func (p *controlledDaemonProvider) ListProjects(ctx context.Context) ([]project.Project, error) {
+	started := time.Now()
+	if p.starts != nil {
+		p.starts <- started
+	}
+	p.controlMu.Lock()
+	p.calls++
+	call := p.calls
+	block := p.blockFirst
+	delay := p.firstDelay
+	p.controlMu.Unlock()
+	defer func() {
+		if p.finishes != nil {
+			p.finishes <- time.Now()
+		}
+	}()
+
+	if call == 1 && block {
+		<-ctx.Done()
+		return nil, ctx.Err()
+	}
+	if call == 1 && delay > 0 {
+		timer := time.NewTimer(delay)
+		defer timer.Stop()
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-timer.C:
+		}
+	}
+	return p.mutableDaemonProvider.ListProjects(ctx)
+}
+
+type failAfterWriter struct {
+	writes int
+}
+
+func (w *failAfterWriter) Write(data []byte) (int, error) {
+	w.writes++
+	if w.writes > 1 {
+		return 0, errors.New("write failed")
+	}
+	return len(data), nil
+}
+
 func openDaemonStore(t *testing.T, provider *mutableDaemonProvider) *store.Store {
 	t.Helper()
 	registry, err := store.Open(context.Background(), filepath.Join(t.TempDir(), "facets.db"))
@@ -78,6 +133,11 @@ func openDaemonStore(t *testing.T, provider *mutableDaemonProvider) *store.Store
 
 func startTaskDaemon(t *testing.T, provider *mutableDaemonProvider, registry *store.Store, interval time.Duration) (*bufio.Scanner, context.CancelFunc, <-chan int, *bytes.Buffer) {
 	t.Helper()
+	return startTaskDaemonAtRuntime(t, provider, registry, interval, t.TempDir(), nil)
+}
+
+func startTaskDaemonAtRuntime(t *testing.T, provider project.Provider, registry *store.Store, interval time.Duration, runtimeDir string, configure func(*App)) (*bufio.Scanner, context.CancelFunc, <-chan int, *bytes.Buffer) {
+	t.Helper()
 	readPipe, writePipe, err := os.Pipe()
 	if err != nil {
 		t.Fatal(err)
@@ -85,7 +145,18 @@ func startTaskDaemon(t *testing.T, provider *mutableDaemonProvider, registry *st
 	t.Cleanup(func() { _ = readPipe.Close() })
 	ctx, cancel := context.WithCancel(context.Background())
 	stderr := &bytes.Buffer{}
-	app := App{Provider: provider, ProjectStore: registry, Stdout: writePipe, Stderr: stderr, TaskDaemonInterval: interval}
+	app := App{
+		Provider:           provider,
+		ProjectStore:       registry,
+		Stdout:             writePipe,
+		Stderr:             stderr,
+		Env:                map[string]string{"XDG_RUNTIME_DIR": runtimeDir},
+		TaskDaemonInterval: interval,
+		TaskDaemonLockPath: filepath.Join(runtimeDir, "daemon.lock"),
+	}
+	if configure != nil {
+		configure(&app)
+	}
 	done := make(chan int, 1)
 	go func() {
 		done <- app.Run(ctx, []string{"tasks", "daemon"})
@@ -246,15 +317,131 @@ func TestTaskDaemonRecoversAfterRefreshError(t *testing.T) {
 	}
 }
 
+func TestTaskDaemonRejectsConcurrentInstance(t *testing.T) {
+	withRuntimeEnv := App{Env: map[string]string{"XDG_RUNTIME_DIR": t.TempDir()}}
+	withoutRuntimeEnv := App{}
+	if withRuntimeEnv.taskDaemonLockFile() != withoutRuntimeEnv.taskDaemonLockFile() {
+		t.Fatalf("default lock path depends on XDG_RUNTIME_DIR: %q != %q", withRuntimeEnv.taskDaemonLockFile(), withoutRuntimeEnv.taskDaemonLockFile())
+	}
+
+	provider := newMutableDaemonProvider(nil, nil)
+	registry := openDaemonStore(t, provider)
+	runtimeDir := t.TempDir()
+	scanner, cancel, done, _ := startTaskDaemonAtRuntime(t, provider, registry, 5*time.Second, runtimeDir, nil)
+	_ = scanDaemonEvent(t, scanner)
+	var stdout, stderr bytes.Buffer
+
+	second := App{
+		Provider:           provider,
+		ProjectStore:       registry,
+		Stdout:             &stdout,
+		Stderr:             &stderr,
+		TaskDaemonInterval: 5 * time.Second,
+		TaskDaemonLockPath: filepath.Join(runtimeDir, "daemon.lock"),
+	}
+	if code := second.Run(context.Background(), []string{"tasks", "daemon"}); code != 1 {
+		t.Fatalf("concurrent daemon exit code = %d", code)
+	}
+	if !strings.Contains(stderr.String(), "another tasks daemon is already running") {
+		t.Fatalf("concurrent daemon stderr = %q", stderr.String())
+	}
+	stopTaskDaemon(t, cancel, done)
+}
+
+func TestTaskDaemonRefreshTimeoutRecovers(t *testing.T) {
+	base := newMutableDaemonProvider([]project.Project{{ID: "demo", Name: "Demo"}}, nil)
+	provider := &controlledDaemonProvider{mutableDaemonProvider: base, blockFirst: true}
+	registry := openDaemonStore(t, base)
+	scanner, cancel, done, stderr := startTaskDaemonAtRuntime(t, provider, registry, minimumTaskDaemonInterval, t.TempDir(), func(app *App) {
+		app.TaskDaemonRefreshTimeout = minimumTaskDaemonRefreshTimeout
+	})
+
+	var failure taskDaemonError
+	if err := json.Unmarshal(scanDaemonEvent(t, scanner), &failure); err != nil {
+		t.Fatal(err)
+	}
+	if failure.Type != "error" || !strings.Contains(failure.Message, "context deadline exceeded") {
+		t.Fatalf("timeout event = %#v", failure)
+	}
+
+	var recovered taskDaemonSnapshot
+	if err := json.Unmarshal(scanDaemonEvent(t, scanner), &recovered); err != nil {
+		t.Fatal(err)
+	}
+	if recovered.Type != "snapshot" || len(recovered.Projects) != 1 || recovered.Projects[0].ID != "demo" {
+		t.Fatalf("recovered snapshot = %#v", recovered)
+	}
+	stopTaskDaemon(t, cancel, done)
+	if !strings.Contains(stderr.String(), "refresh failed: list projects: context deadline exceeded") {
+		t.Fatalf("stderr = %q", stderr.String())
+	}
+}
+
+func TestTaskDaemonWaitsIntervalAfterRefreshCompletion(t *testing.T) {
+	base := newMutableDaemonProvider(nil, nil)
+	starts := make(chan time.Time, 4)
+	finishes := make(chan time.Time, 4)
+	provider := &controlledDaemonProvider{
+		mutableDaemonProvider: base,
+		firstDelay:            350 * time.Millisecond,
+		starts:                starts,
+		finishes:              finishes,
+	}
+	registry := openDaemonStore(t, base)
+	scanner, cancel, done, _ := startTaskDaemonAtRuntime(t, provider, registry, minimumTaskDaemonInterval, t.TempDir(), func(app *App) {
+		app.TaskDaemonRefreshTimeout = 2 * time.Second
+	})
+	_ = scanDaemonEvent(t, scanner)
+
+	var firstFinished, secondStarted time.Time
+	select {
+	case firstFinished = <-finishes:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for first refresh completion")
+	}
+	<-starts
+	select {
+	case secondStarted = <-starts:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for second refresh")
+	}
+	if gap := secondStarted.Sub(firstFinished); gap < minimumTaskDaemonInterval-25*time.Millisecond {
+		t.Fatalf("next refresh started after %s, want at least %s", gap, minimumTaskDaemonInterval)
+	}
+	stopTaskDaemon(t, cancel, done)
+}
+
+func TestTaskDaemonHeartbeatDetectsWriteFailure(t *testing.T) {
+	provider := newMutableDaemonProvider(nil, nil)
+	registry := openDaemonStore(t, provider)
+	writer := &failAfterWriter{}
+	var stderr bytes.Buffer
+	app := App{
+		Provider:                    provider,
+		ProjectStore:                registry,
+		Stdout:                      writer,
+		Stderr:                      &stderr,
+		TaskDaemonInterval:          maximumTaskDaemonInterval,
+		TaskDaemonHeartbeatInterval: 25 * time.Millisecond,
+		TaskDaemonLockPath:          filepath.Join(t.TempDir(), "daemon.lock"),
+	}
+	if code := app.Run(context.Background(), []string{"tasks", "daemon"}); code != 1 {
+		t.Fatalf("heartbeat write failure exit code = %d", code)
+	}
+	if writer.writes != 2 || !strings.Contains(stderr.String(), "write heartbeat: write failed") {
+		t.Fatalf("writes = %d, stderr = %q", writer.writes, stderr.String())
+	}
+}
+
 func TestTaskDaemonHelpIntervalAndWriteFailure(t *testing.T) {
 	provider := newMutableDaemonProvider(nil, nil)
 	registry := openDaemonStore(t, provider)
 	var stdout, stderr bytes.Buffer
-	app := App{Provider: provider, ProjectStore: registry, Stdout: &stdout, Stderr: &stderr}
+	app := App{Provider: provider, ProjectStore: registry, Stdout: &stdout, Stderr: &stderr, TaskDaemonLockPath: filepath.Join(t.TempDir(), "daemon.lock")}
 	if code := app.Run(context.Background(), []string{"tasks", "daemon", "--help"}); code != 0 {
 		t.Fatalf("help code = %d", code)
 	}
-	for _, want := range []string{"newline-delimited JSON", "snapshot event", "error event", "--interval <duration>"} {
+	for _, want := range []string{"newline-delimited JSON", "snapshot event", "error event", "--interval <duration>", "--refresh-timeout <duration>"} {
 		if !strings.Contains(stdout.String(), want) {
 			t.Errorf("help missing %q:\n%s", want, stdout.String())
 		}
@@ -266,6 +453,14 @@ func TestTaskDaemonHelpIntervalAndWriteFailure(t *testing.T) {
 	}
 	if !strings.Contains(stdout.String(), "--interval must be between 250ms and 5m") {
 		t.Fatalf("invalid interval output = %s", stdout.String())
+	}
+
+	stdout.Reset()
+	if code := app.Run(context.Background(), []string{"tasks", "daemon", "--refresh-timeout", "10ms"}); code != 2 {
+		t.Fatalf("invalid refresh timeout code = %d, stdout = %s", code, stdout.String())
+	}
+	if !strings.Contains(stdout.String(), "--refresh-timeout must be between 250ms and 5m") {
+		t.Fatalf("invalid refresh timeout output = %s", stdout.String())
 	}
 
 	stderr.Reset()
