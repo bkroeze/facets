@@ -489,8 +489,10 @@ omarchy restart waybar
 
 ### Troubleshooting
 
-- Run `facets tasks daemon --interval 5s` directly. By default, stdout must
-  contain only JSON events; provider and registry diagnostics appear on stderr.
+- Stop the hosted Quickshell process before running `facets tasks daemon
+  --interval 5s` directly, or inspect that process's stderr logs instead. Only
+  one daemon may run per user. By default, stdout contains only JSON events;
+  provider and registry diagnostics appear on stderr.
 - Run `quickshell --path quickshell/facets` from the checkout to keep QML,
   process, and parser errors in the foreground.
 - Run `quickshell ipc --config facets show` to list the `facets` target and

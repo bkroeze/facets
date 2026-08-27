@@ -58,6 +58,11 @@ type taskDaemonError struct {
 	Retrying bool   `json:"retrying"`
 }
 
+type taskDaemonPollResult struct {
+	snapshot taskDaemonSnapshot
+	err      error
+}
+
 func (a *App) runTaskDaemon(ctx context.Context, stdout, stderr io.Writer, cfg runConfig, args []string) int {
 	fs := commandFlags(a.taskUsageCommand(cfg) + " daemon")
 	interval := defaultTaskDaemonInterval
@@ -101,22 +106,44 @@ func (a *App) runTaskDaemon(ctx context.Context, stdout, stderr io.Writer, cfg r
 	}
 	defer lock.Close()
 
-	timer := time.NewTimer(time.Hour)
-	if !timer.Stop() {
-		<-timer.C
-	}
-	defer timer.Stop()
+	heartbeat := time.NewTicker(heartbeatInterval)
+	defer heartbeat.Stop()
 
 	var lastEvent []byte
-	var lastWrite time.Time
 	eventFormat := cfg.format
 	if !cfg.formatSet && eventFormat == "toon" {
 		eventFormat = "json"
 	}
 	for {
 		refreshCtx, cancel := context.WithTimeout(ctx, refreshTimeout)
-		snapshot, refreshErr := a.taskDaemonPoll(refreshCtx, provider)
-		cancel()
+		refreshDone := make(chan taskDaemonPollResult, 1)
+		go func() {
+			snapshot, err := a.taskDaemonPoll(refreshCtx, provider)
+			refreshDone <- taskDaemonPollResult{snapshot: snapshot, err: err}
+		}()
+
+		var result taskDaemonPollResult
+	refresh:
+		for {
+			select {
+			case <-ctx.Done():
+				cancel()
+				return 0
+			case result = <-refreshDone:
+				cancel()
+				break refresh
+			case <-heartbeat.C:
+				if len(lastEvent) == 0 {
+					continue
+				}
+				if _, writeErr := stdout.Write(lastEvent); writeErr != nil {
+					cancel()
+					fmt.Fprintf(stderr, "facets tasks daemon: write heartbeat: %v\n", writeErr)
+					return 1
+				}
+			}
+		}
+		snapshot, refreshErr := result.snapshot, result.err
 
 		var event any = snapshot
 		if refreshErr != nil {
@@ -132,45 +159,33 @@ func (a *App) runTaskDaemon(ctx context.Context, stdout, stderr io.Writer, cfg r
 			fmt.Fprintf(stderr, "facets tasks daemon: encode event: %v\n", marshalErr)
 			return 1
 		}
-		now := time.Now()
 		if !bytes.Equal(encoded, lastEvent) {
 			if _, writeErr := stdout.Write(encoded); writeErr != nil {
 				fmt.Fprintf(stderr, "facets tasks daemon: write event: %v\n", writeErr)
 				return 1
 			}
 			lastEvent = append(lastEvent[:0], encoded...)
-			lastWrite = now
 		}
 
-		nextPoll := now.Add(interval)
-		nextHeartbeat := lastWrite.Add(heartbeatInterval)
+		timer := time.NewTimer(interval)
+	wait:
 		for {
-			wakeAt := nextPoll
-			if nextHeartbeat.Before(wakeAt) {
-				wakeAt = nextHeartbeat
-			}
-			delay := time.Until(wakeAt)
-			if delay < 0 {
-				delay = 0
-			}
-			timer.Reset(delay)
 			select {
 			case <-ctx.Done():
+				if !timer.Stop() {
+					<-timer.C
+				}
 				return 0
 			case <-timer.C:
-			}
-
-			now = time.Now()
-			if !now.Before(nextHeartbeat) {
+				break wait
+			case <-heartbeat.C:
 				if _, writeErr := stdout.Write(lastEvent); writeErr != nil {
+					if !timer.Stop() {
+						<-timer.C
+					}
 					fmt.Fprintf(stderr, "facets tasks daemon: write heartbeat: %v\n", writeErr)
 					return 1
 				}
-				lastWrite = now
-				nextHeartbeat = now.Add(heartbeatInterval)
-			}
-			if !now.Before(nextPoll) {
-				break
 			}
 		}
 	}

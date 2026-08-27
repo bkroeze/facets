@@ -67,6 +67,7 @@ type controlledDaemonProvider struct {
 	*mutableDaemonProvider
 	controlMu  sync.Mutex
 	blockFirst bool
+	blockCall  int
 	firstDelay time.Duration
 	starts     chan time.Time
 	finishes   chan time.Time
@@ -82,6 +83,7 @@ func (p *controlledDaemonProvider) ListProjects(ctx context.Context) ([]project.
 	p.calls++
 	call := p.calls
 	block := p.blockFirst
+	blockCall := p.blockCall
 	delay := p.firstDelay
 	p.controlMu.Unlock()
 	defer func() {
@@ -90,7 +92,7 @@ func (p *controlledDaemonProvider) ListProjects(ctx context.Context) ([]project.
 		}
 	}()
 
-	if call == 1 && block {
+	if (call == 1 && block) || call == blockCall {
 		<-ctx.Done()
 		return nil, ctx.Err()
 	}
@@ -427,6 +429,51 @@ func TestTaskDaemonHeartbeatDetectsWriteFailure(t *testing.T) {
 	}
 	if code := app.Run(context.Background(), []string{"tasks", "daemon"}); code != 1 {
 		t.Fatalf("heartbeat write failure exit code = %d", code)
+	}
+	if writer.writes != 2 || !strings.Contains(stderr.String(), "write heartbeat: write failed") {
+		t.Fatalf("writes = %d, stderr = %q", writer.writes, stderr.String())
+	}
+}
+
+func TestTaskDaemonHeartbeatContinuesDuringRefresh(t *testing.T) {
+	base := newMutableDaemonProvider(nil, nil)
+	provider := &controlledDaemonProvider{mutableDaemonProvider: base, blockCall: 2, starts: make(chan time.Time, 2)}
+	registry := openDaemonStore(t, base)
+	writer := &failAfterWriter{}
+	var stderr bytes.Buffer
+	app := App{
+		Provider:                    provider,
+		ProjectStore:                registry,
+		Stdout:                      writer,
+		Stderr:                      &stderr,
+		TaskDaemonInterval:          minimumTaskDaemonInterval,
+		TaskDaemonRefreshTimeout:    maximumTaskDaemonRefreshTimeout,
+		TaskDaemonHeartbeatInterval: 400 * time.Millisecond,
+		TaskDaemonLockPath:          filepath.Join(t.TempDir(), "daemon.lock"),
+	}
+
+	done := make(chan int, 1)
+	go func() {
+		done <- app.Run(context.Background(), []string{"tasks", "daemon"})
+	}()
+	select {
+	case <-provider.starts:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for initial refresh")
+	}
+	select {
+	case <-provider.starts:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for blocked refresh")
+	}
+
+	select {
+	case code := <-done:
+		if code != 1 {
+			t.Fatalf("heartbeat write failure exit code = %d", code)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("heartbeat did not detect a detached consumer during refresh")
 	}
 	if writer.writes != 2 || !strings.Contains(stderr.String(), "write heartbeat: write failed") {
 		t.Fatalf("writes = %d, stderr = %q", writer.writes, stderr.String())
