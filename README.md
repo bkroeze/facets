@@ -262,9 +262,10 @@ command -v facets kata quickshell uwsm-app xdg-terminal-exec
 facets tasks daemon --interval 5s
 ```
 
-The final command should immediately print one JSON `snapshot` line and remain
-running until interrupted. If it reports a provider error, fix Kata before
-starting Quickshell.
+The final command should print newline-delimited JSON events and remain running
+until interrupted. A `heartbeat` may precede the first `snapshot` while the
+provider refresh is still running. If it reports a provider error, fix Kata
+before starting Quickshell.
 
 Hyprland/UWSM does not necessarily inherit an interactive shell's startup
 files. Inspect the imported session path with:
