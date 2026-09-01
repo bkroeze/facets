@@ -146,13 +146,18 @@ flag before the command to select human or TOON output instead.
 
 ```sh
 facets tasks daemon
-facets tasks daemon --interval 5s
+facets tasks daemon --interval 5s --refresh-timeout 30s
 ```
 
-A `snapshot` event replaces the prior project tree. An `error` event is
+Only one task daemon runs per user. Each provider refresh is canceled after 10
+seconds by default, and the next refresh waits for the configured interval
+after the prior one finishes. The daemon periodically repeats its latest event
+so a detached stdout consumer is detected and the singleton lock is released.
+A state-free `heartbeat` event may appear before the first provider result. A
+`snapshot` event replaces the prior project tree. An `error` event is
 recoverable; consumers should retain the last valid snapshot while the daemon
 retries. Runtime diagnostics go to stderr, never into the stdout protocol. Run
-`facets tasks daemon --help` for the complete event fields and polling limits.
+`facets tasks daemon --help` for the complete event fields and timing limits.
 
 
 ## Daily focus and today summary
@@ -257,9 +262,10 @@ command -v facets kata quickshell uwsm-app xdg-terminal-exec
 facets tasks daemon --interval 5s
 ```
 
-The final command should immediately print one JSON `snapshot` line and remain
-running until interrupted. If it reports a provider error, fix Kata before
-starting Quickshell.
+The final command should print newline-delimited JSON events and remain running
+until interrupted. A `heartbeat` may precede the first `snapshot` while the
+provider refresh is still running. If it reports a provider error, fix Kata
+before starting Quickshell.
 
 Hyprland/UWSM does not necessarily inherit an interactive shell's startup
 files. Inspect the imported session path with:
@@ -485,8 +491,10 @@ omarchy restart waybar
 
 ### Troubleshooting
 
-- Run `facets tasks daemon --interval 5s` directly. By default, stdout must
-  contain only JSON events; provider and registry diagnostics appear on stderr.
+- Stop the hosted Quickshell process before running `facets tasks daemon
+  --interval 5s` directly, or inspect that process's stderr logs instead. Only
+  one daemon may run per user. By default, stdout contains only JSON events;
+  provider and registry diagnostics appear on stderr.
 - Run `quickshell --path quickshell/facets` from the checkout to keep QML,
   process, and parser errors in the foreground.
 - Run `quickshell ipc --config facets show` to list the `facets` target and

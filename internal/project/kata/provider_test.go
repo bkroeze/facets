@@ -3,6 +3,8 @@ package kata
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -493,6 +495,60 @@ func TestCommandCancellationRetainsContextAndCommandErrors(t *testing.T) {
 		t.Fatalf("error does not retain CommandError: %v", err)
 	}
 	runner.done()
+}
+
+func TestExecRunnerCancellationKillsDescendants(t *testing.T) {
+	if _, err := os.Stat("/bin/sh"); err != nil {
+		t.Skip("/bin/sh is unavailable")
+	}
+	tempDir := t.TempDir()
+	marker := filepath.Join(tempDir, "survived")
+	ready := filepath.Join(tempDir, "ready")
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	type result struct {
+		err error
+	}
+	done := make(chan result, 1)
+	go func() {
+		_, _, err := (execRunner{}).Run(
+			ctx,
+			"/bin/sh",
+			"-c",
+			`(sleep 0.5; printf survived > "$1") & printf ready > "$2"; wait`,
+			"facets-exec-runner-test",
+			marker,
+			ready,
+		)
+		done <- result{err: err}
+	}()
+
+	deadline := time.Now().Add(time.Second)
+	for {
+		if _, err := os.Stat(ready); err == nil {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("descendant process did not start")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	cancel()
+
+	select {
+	case result := <-done:
+		if result.err == nil {
+			t.Fatal("execRunner.Run() succeeded after cancellation")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("execRunner.Run() remained blocked after cancellation")
+	}
+
+	time.Sleep(600 * time.Millisecond)
+	if _, err := os.Stat(marker); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("descendant survived process-group cancellation: marker error = %v", err)
+	}
 }
 
 func TestNotFoundRequiresStructuredExactKind(t *testing.T) {
