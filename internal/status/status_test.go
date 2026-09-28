@@ -15,8 +15,8 @@ import (
 )
 
 type fakeProvider struct {
-	tasks []project.Task
 	err   error
+	tasks []project.Task
 }
 
 func (f fakeProvider) Name() string                                            { return "fake" }
@@ -51,10 +51,10 @@ func (f fakeProvider) CommentTask(context.Context, string, string, string) (proj
 func (f fakeProvider) DeleteTask(context.Context, string, string) error { return errors.New("unused") }
 
 type fakeActivity struct {
+	err      error
+	since    time.Time
 	activity Activity
 	root     string
-	since    time.Time
-	err      error
 }
 
 func (f *fakeActivity) Summarize(_ context.Context, root string, since time.Time) (Activity, error) {
@@ -99,16 +99,16 @@ func TestBuilderBuildValidatesInputs(t *testing.T) {
 	provider := fakeProvider{}
 	validActivity := &fakeActivity{}
 	cases := []struct {
-		name  string
 		build func() (Summary, error)
+		name  string
 	}{
-		{"provider", func() (Summary, error) {
+		{name: "provider", build: func() (Summary, error) {
 			return (&Builder{Activity: validActivity, PeriodDays: 1}).Build(context.Background(), nil, root, "p")
 		}},
-		{"activity", func() (Summary, error) {
+		{name: "activity", build: func() (Summary, error) {
 			return (&Builder{PeriodDays: 1}).Build(context.Background(), provider, root, "p")
 		}},
-		{"root", func() (Summary, error) {
+		{name: "root", build: func() (Summary, error) {
 			return (&Builder{Activity: validActivity, PeriodDays: 1}).Build(context.Background(), provider, filepath.Join(root, "missing"), "p")
 		}},
 	}
@@ -218,7 +218,11 @@ func createActivityDB(t *testing.T, path, table string, rows []activityRow) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer db.Close()
+	t.Cleanup(func() {
+		if err := db.Close(); err != nil {
+			t.Errorf("Close() error = %v", err)
+		}
+	})
 	timestampColumn := "created_at"
 	createSQL := "CREATE TABLE " + table + " (cwd TEXT, " + timestampColumn + " TEXT"
 	if table == "threads" {

@@ -51,7 +51,7 @@ Provider metadata, local project directories, and activity-database paths are ne
 
 ### Task
 
-`status` is `open` or `closed`. `priority` is an integer from 0 through 4 or `null`. Empty `description` and `assignee` values are represented as empty strings.
+`status` is `open` or `closed`. `priority` is an integer from 0 through 4 or `null`. Empty `description` and `assignee` values are represented as empty strings. `top` is a boolean derived from provider metadata `facets.top`; metadata values encoded as the string `"true"` are reported as `true`.
 
 ```json
 {
@@ -62,6 +62,7 @@ Provider metadata, local project directories, and activity-database paths are ne
   "status": "open",
   "priority": 2,
   "assignee": "bruce",
+  "top": false,
   "created_at": "2026-08-12T12:00:00Z",
   "updated_at": "2026-08-12T12:30:00.123Z"
 }
@@ -92,12 +93,13 @@ Create request:
 
 `title` is required and non-empty. `idempotency_key` is optional, but clients SHOULD generate a stable key before retrying a create request. Repeating the same key for the same project must not create another task.
 
-Patch request fields are optional. At least one field must be present. `title` cannot be null or empty; `description` and `assignee` may be empty strings; `priority: null` clears priority. Lifecycle fields are not accepted by PATCH.
+Patch request fields are optional. At least one field must be present. `title` cannot be null or empty; `description` and `assignee` may be empty strings; `priority: null` clears priority; `top` must be a boolean and persists provider metadata `facets.top` as the string `"true"` or `"false"`. Lifecycle fields are not accepted by PATCH. A JSON `null` value for `top` is rejected.
 
 ```json
 {
   "title": "Define Android API",
-  "priority": null
+  "priority": null,
+  "top": true
 }
 ```
 
@@ -124,6 +126,39 @@ Delete request. `confirm` must exactly equal the opaque task ID from the path. D
 ```json
 {"confirm":"ab12"}
 ```
+
+### Today
+
+Today uses the server's local calendar day. `focus` is `null` when no focus has
+been saved for that day. Top tasks include only open tasks whose `facets.top`
+metadata is `true` (providers may return this metadata as a boolean or the
+string `"true"`). Completion counts include closed tasks whose provider
+`updated_at` falls within the local day; `top` counts the subset marked top.
+Projects and tasks are returned in deterministic project-ID and task ordering.
+
+```json
+{
+  "focus": {"text": "Ship the release", "day_start": "2026-08-30T00:00:00Z"},
+  "top_tasks": [
+    {"project": "facets", "project_name": "Facets", "task": "ab12", "title": "Add Android API"}
+  ],
+  "completed_today": {
+    "all": 2,
+    "top": 1,
+    "day_start": "2026-08-30T00:00:00Z",
+    "day_end": "2026-08-31T00:00:00Z"
+  }
+}
+```
+
+| Method | Path | Request | Success |
+| --- | --- | --- | --- |
+| `GET` | `/api/v1/today` | — | `200 Today` |
+| `POST` | `/api/v1/today/focus` | `{"text":"Ship the release"}` | `200 {"focus":{"text":"...","day_start":"..."}}` |
+
+The focus request requires a non-empty `text` value. Request objects are
+strict; unknown fields and `text: null` are rejected.
+
 
 ### Saved view and task query
 
@@ -222,7 +257,7 @@ internal error strings.
 | `409` | `conflict` | Request conflicts with existing state or idempotency history |
 | `415` | `unsupported_media_type` | JSON request did not use `application/json` |
 | `422` | `validation_failed` | JSON shape is valid but one or more values are invalid |
-| `408` | `request_canceled` | Request context was canceled before completion |
+| `503` | `registry_unavailable` | Local registry is unavailable |
 | `501` | `unsupported_operation` | Configured provider cannot perform the normalized operation |
 | `502` | `provider_failure` | Provider failed without a more specific public classification |
 | `503` | `provider_unavailable` | Configured provider is unavailable |

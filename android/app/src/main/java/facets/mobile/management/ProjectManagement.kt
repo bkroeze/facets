@@ -56,6 +56,8 @@ import facets.mobile.data.model.CreateTaskRequest
 import facets.mobile.data.model.SavedView
 import facets.mobile.data.model.Task
 import facets.mobile.data.model.TaskStatus
+import facets.mobile.data.model.TodayFocus
+import facets.mobile.data.model.TodaySnapshot
 import facets.mobile.data.model.UpdateTaskRequest
 import facets.mobile.data.model.ViewOrderDirection
 import facets.mobile.data.model.ViewOrderField
@@ -72,6 +74,12 @@ private const val STALE_AFTER_MINUTES = 15L
 
 data class ProjectListUiState(val projects: List<facets.mobile.data.model.Project> = emptyList(), val loading: Boolean = true, val refreshing: Boolean = false, val error: String? = null, val stale: Boolean = false)
 data class ProjectDetailUiState(val project: facets.mobile.data.model.Project? = null, val tasks: List<Task> = emptyList(), val views: List<SavedView> = emptyList(), val activeViewId: String? = null, val loading: Boolean = true, val refreshing: Boolean = false, val error: String? = null, val stale: Boolean = false)
+data class TodayUiState(
+    val snapshot: TodaySnapshot? = null,
+    val loading: Boolean = true,
+    val refreshing: Boolean = false,
+    val error: String? = null,
+)
 
 /** Coordinates Room-backed reads and connected mutations while retaining cached data on failure. */
 class ProjectManagementController(private val repository: OfflineFacetsRepository, private val scope: CoroutineScope) {
@@ -79,6 +87,8 @@ class ProjectManagementController(private val repository: OfflineFacetsRepositor
     val projects: StateFlow<ProjectListUiState> = _projects.asStateFlow()
     private val _detail = MutableStateFlow(ProjectDetailUiState())
     val detail: StateFlow<ProjectDetailUiState> = _detail.asStateFlow()
+    private val _today = MutableStateFlow(TodayUiState())
+    val today: StateFlow<TodayUiState> = _today.asStateFlow()
     private var projectJob: Job? = null
     private var tasksJob: Job? = null
     private var allTasks: List<Task> = emptyList()
@@ -88,38 +98,101 @@ class ProjectManagementController(private val repository: OfflineFacetsRepositor
         scope.launch { repository.observeProjects().collect { value -> _projects.value = _projects.value.copy(projects = value, loading = false) } }
         scope.launch { repository.observeViews().collect { value -> _detail.value = _detail.value.copy(views = value, activeViewId = _detail.value.activeViewId ?: value.firstOrNull()?.id); recomputeTasks() } }
         refreshProjects()
+        refreshToday()
     }
+
     fun selectProject(projectId: String) {
         if (currentProjectId == projectId) return
-        currentProjectId = projectId; tasksJob?.cancel(); projectJob?.cancel()
-        _detail.value = ProjectDetailUiState(project = _projects.value.projects.firstOrNull { it.id == projectId }, views = _detail.value.views, activeViewId = _detail.value.activeViewId ?: _detail.value.views.firstOrNull()?.id)
-        projectJob = scope.launch { repository.observeProjects().collect { list -> _detail.value = _detail.value.copy(project = list.firstOrNull { it.id == projectId }) } }
-        tasksJob = scope.launch { repository.observeTasks(projectId).collect { value -> allTasks = value; _detail.value = _detail.value.copy(loading = false, tasks = filteredTasks()) } }
+        currentProjectId = projectId
+        tasksJob?.cancel()
+        projectJob?.cancel()
+        _detail.value = ProjectDetailUiState(
+            project = _projects.value.projects.firstOrNull { it.id == projectId },
+            views = _detail.value.views,
+            activeViewId = _detail.value.activeViewId ?: _detail.value.views.firstOrNull()?.id,
+        )
+        projectJob = scope.launch {
+            repository.observeProjects().collect { list ->
+                _detail.value = _detail.value.copy(project = list.firstOrNull { it.id == projectId })
+            }
+        }
+        tasksJob = scope.launch {
+            repository.observeTasks(projectId).collect { value ->
+                allTasks = value
+                _detail.value = _detail.value.copy(loading = false, tasks = filteredTasks())
+            }
+        }
         refreshProject(projectId)
     }
-    fun selectView(viewId: String?) { _detail.value = _detail.value.copy(activeViewId = viewId, tasks = filteredTasks(viewId)) }
+
+    fun selectView(viewId: String?) {
+        _detail.value = _detail.value.copy(activeViewId = viewId, tasks = filteredTasks(viewId))
+    }
+
     fun refreshProjects() {
         if (_projects.value.refreshing) return
-        scope.launch { _projects.value = _projects.value.copy(refreshing = true, error = null); runCatching { repository.refreshProjects() }.onFailure { _projects.value = _projects.value.copy(error = readableError(it)) }; _projects.value = _projects.value.copy(refreshing = false, stale = isStale("projects")) }
+        scope.launch {
+            _projects.value = _projects.value.copy(refreshing = true, error = null)
+            runCatching { repository.refreshProjects() }
+                .onFailure { _projects.value = _projects.value.copy(error = readableError(it)) }
+            _projects.value = _projects.value.copy(refreshing = false, stale = isStale("projects"))
+        }
     }
+
     fun refreshProject(projectId: String? = currentProjectId) {
         val id = projectId ?: return
         if (_detail.value.refreshing) return
-        scope.launch { _detail.value = _detail.value.copy(refreshing = true, error = null); runCatching { repository.refreshProject(id) }.onFailure { _detail.value = _detail.value.copy(error = readableError(it)) }; _detail.value = _detail.value.copy(refreshing = false, stale = isStale("tasks:$id")) }
+        scope.launch {
+            _detail.value = _detail.value.copy(refreshing = true, error = null)
+            runCatching { repository.refreshProject(id) }
+                .onFailure { _detail.value = _detail.value.copy(error = readableError(it)) }
+            _detail.value = _detail.value.copy(refreshing = false, stale = isStale("tasks:$id"))
+        }
     }
+
+    fun refreshToday() {
+        if (_today.value.refreshing) return
+        _today.value = _today.value.copy(refreshing = true, error = null)
+        scope.launch {
+            runCatching { repository.getToday() }
+                .onSuccess { _today.value = TodayUiState(snapshot = it) }
+                .onFailure { _today.value = _today.value.copy(loading = false, refreshing = false, error = readableError(it)) }
+        }
+    }
+
+    suspend fun setTodayFocus(text: String): Result<TodayFocus> = runCatching {
+        repository.setTodayFocus(text.trim()).also { focus ->
+            _today.value = _today.value.copy(
+                snapshot = _today.value.snapshot?.copy(focus = focus),
+                error = null,
+            )
+        }
+    }
+
     suspend fun createTask(projectId: String, request: CreateTaskRequest): Result<Task> = mutate { repository.createTask(projectId, request) }
+    suspend fun toggleTopTask(projectId: String, task: Task): Result<Task> =
+        updateTask(
+            projectId,
+            task.id,
+            UpdateTaskRequest(top = !task.top, fields = setOf(facets.mobile.data.model.TaskUpdateField.TOP)),
+        ).also { result ->
+            if (result.isSuccess) refreshToday()
+        }
     suspend fun updateTask(projectId: String, taskId: String, request: UpdateTaskRequest): Result<Task> = mutate { repository.updateTask(projectId, taskId, request) }
     suspend fun commentTask(projectId: String, taskId: String, body: String): Result<Task> = mutate { repository.commentTask(projectId, taskId, CommentRequest(body)) }
     suspend fun closeTask(projectId: String, taskId: String, message: String, evidence: List<String>, comment: String?): Result<Task> = mutate { repository.closeTask(projectId, taskId, CloseTaskRequest(message, evidence, comment)) }
     suspend fun reopenTask(projectId: String, taskId: String): Result<Task> = mutate { repository.reopenTask(projectId, taskId) }
     suspend fun deleteTask(projectId: String, taskId: String): Result<Unit> = mutate { repository.deleteTask(projectId, taskId) }
+
     private suspend fun <T> mutate(operation: suspend () -> T): Result<T> = runCatching { operation() }
+
     private fun filteredTasks(viewId: String? = _detail.value.activeViewId): List<Task> {
         val view = _detail.value.views.firstOrNull { it.id == viewId } ?: return allTasks
         val filtered = allTasks.filter { task -> (view.query.statuses.isEmpty() || task.status in view.query.statuses) && (view.query.assignees.isEmpty() || task.assignee in view.query.assignees) && (view.query.priorities.isEmpty() || task.priority in view.query.priorities) }
         val sorted = when (view.order.field) { ViewOrderField.TITLE -> filtered.sortedBy { it.title.lowercase() }; ViewOrderField.STATUS -> filtered.sortedBy { it.status.name }; ViewOrderField.PRIORITY -> filtered.sortedBy { it.priority }; ViewOrderField.ASSIGNEE -> filtered.sortedBy { it.assignee.lowercase() }; ViewOrderField.CREATED_AT -> filtered.sortedBy { it.createdAt }; ViewOrderField.UPDATED_AT -> filtered.sortedBy { it.updatedAt } }
         return if (view.order.direction == ViewOrderDirection.DESC) sorted.asReversed() else sorted
     }
+
     private fun recomputeTasks() { _detail.value = _detail.value.copy(tasks = filteredTasks()) }
     private suspend fun isStale(scopeName: String): Boolean = repository.syncState(scopeName)?.lastSuccess?.let { Duration.between(it, Instant.now()).toMinutes() >= STALE_AFTER_MINUTES } ?: false
     private fun readableError(error: Throwable): String = error.message?.takeIf { it.isNotBlank() } ?: "Unable to update cached data. Check your connection and try again."
@@ -155,6 +228,7 @@ fun ProjectDetailScreen(
 ) {
     LaunchedEffect(projectId) { controller.selectProject(projectId) }
     val state by controller.detail.collectAsState()
+    val scope = rememberCoroutineScope()
     var viewMenuOpen by remember { mutableStateOf(false) }
     Scaffold(
         modifier = modifier,
@@ -216,7 +290,15 @@ fun ProjectDetailScreen(
                     verticalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
                     items(state.tasks, key = { it.id }) { task ->
-                        TaskRow(task) { onOpenTask(projectId, task.id) }
+                        TaskRow(
+                            task = task,
+                            onClick = { onOpenTask(projectId, task.id) },
+                            onToggleTop = {
+                                scope.launch {
+                                    controller.toggleTopTask(projectId, task)
+                                }
+                            },
+                        )
                     }
                 }
             }
@@ -224,7 +306,33 @@ fun ProjectDetailScreen(
     }
 }
 
-@Composable private fun TaskRow(task: Task, onClick: () -> Unit) { Card(onClick = onClick, modifier = Modifier.fillMaxWidth().semantics { contentDescription = "Open task ${task.title}" }) { Column(Modifier.padding(16.dp)) { Text(task.title, style = MaterialTheme.typography.titleMedium); if (task.description.isNotBlank()) Text(task.description, maxLines = 2); Text("${task.status.name.lowercase().replaceFirstChar { it.uppercase() }} · ${task.assignee.ifBlank { "Unassigned" }}", style = MaterialTheme.typography.labelMedium) } } }
+@Composable
+private fun TaskRow(task: Task, onClick: () -> Unit, onToggleTop: () -> Unit) {
+    Card(
+        onClick = onClick,
+        modifier = Modifier.fillMaxWidth().semantics { contentDescription = "Open task ${task.title}" },
+    ) {
+        Row(
+            Modifier.fillMaxWidth().padding(start = 16.dp, top = 12.dp, bottom = 12.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text(task.title, style = MaterialTheme.typography.titleMedium)
+                if (task.description.isNotBlank()) Text(task.description, maxLines = 2)
+                Text(
+                    "${task.status.name.lowercase().replaceFirstChar { it.uppercase() }} · ${task.assignee.ifBlank { "Unassigned" }}",
+                    style = MaterialTheme.typography.labelMedium,
+                )
+            }
+            TextButton(
+                onClick = onToggleTop,
+                modifier = Modifier.semantics {
+                    contentDescription = if (task.top) "Remove ${task.title} from top tasks" else "Mark ${task.title} as a top task"
+                },
+            ) { Text(if (task.top) "★" else "☆") }
+        }
+    }
+}
 
 @Composable
 fun TaskEditorScreen(initial: Task?, onBack: () -> Unit, onSave: suspend (CreateTaskRequest?, UpdateTaskRequest?) -> Result<Task>, modifier: Modifier = Modifier) {

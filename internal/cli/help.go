@@ -179,9 +179,14 @@ func serveHelp(address string) object {
 
 func helpDocument(usage, description string, options table, examples primitiveArray, commands primitiveArray) object {
 	doc := object{{name: "help", value: object{{name: "usage", value: usage}, {name: "description", value: description}}}}
-	if commands != nil {
-		doc[0].value = append(doc[0].value.(object), field{name: "commands", value: commands})
+	help, ok := doc[0].value.(object)
+	if !ok {
+		return doc
 	}
-	doc[0].value = append(doc[0].value.(object), field{name: "options", value: options}, field{name: "examples", value: examples})
+	if commands != nil {
+		help = append(help, field{name: "commands", value: commands})
+	}
+	help = append(help, field{name: "options", value: options}, field{name: "examples", value: examples})
+	doc[0].value = help
 	return doc
 }

@@ -12,8 +12,8 @@ import (
 
 // Registry stores providers by their stable name.
 type Registry struct {
-	mu        sync.RWMutex
 	providers map[string]Provider
+	mu        sync.RWMutex
 }
 
 // NewRegistry returns an empty provider registry.

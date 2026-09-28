@@ -24,6 +24,7 @@ const apiV1Prefix = "/api/v1"
 var (
 	errAPIV1InvalidRequest       = errors.New("invalid API request")
 	errAPIV1UnsupportedMediaType = errors.New("unsupported API media type")
+	errAPIV1RegistryUnavailable  = errors.New("API registry unavailable")
 )
 
 type apiV1RootResponse struct {
@@ -31,24 +32,50 @@ type apiV1RootResponse struct {
 }
 
 type apiV1Project struct {
+	CreatedAt       *string `json:"created_at"`
+	UpdatedAt       *string `json:"updated_at"`
 	ID              string  `json:"id"`
 	Name            string  `json:"name"`
 	Description     string  `json:"description"`
 	ActiveTaskCount int     `json:"active_task_count"`
-	CreatedAt       *string `json:"created_at"`
-	UpdatedAt       *string `json:"updated_at"`
 }
 
 type apiV1Task struct {
+	Priority    *int           `json:"priority"`
+	CreatedAt   *string        `json:"created_at"`
+	UpdatedAt   *string        `json:"updated_at"`
 	ID          string         `json:"id"`
 	ProjectID   string         `json:"project_id"`
 	Title       string         `json:"title"`
 	Description string         `json:"description"`
 	Status      project.Status `json:"status"`
-	Priority    *int           `json:"priority"`
 	Assignee    string         `json:"assignee"`
-	CreatedAt   *string        `json:"created_at"`
-	UpdatedAt   *string        `json:"updated_at"`
+	Top         bool           `json:"top"`
+}
+
+type apiV1TodayFocus struct {
+	Text     string `json:"text"`
+	DayStart string `json:"day_start"`
+}
+
+type apiV1TodayTask struct {
+	Project     string `json:"project"`
+	ProjectName string `json:"project_name"`
+	Task        string `json:"task"`
+	Title       string `json:"title"`
+}
+
+type apiV1TodayCompletion struct {
+	DayStart string `json:"day_start"`
+	DayEnd   string `json:"day_end"`
+	All      int    `json:"all"`
+	Top      int    `json:"top"`
+}
+
+type apiV1TodayResponse struct {
+	Focus          *apiV1TodayFocus     `json:"focus"`
+	TopTasks       []apiV1TodayTask     `json:"top_tasks"`
+	CompletedToday apiV1TodayCompletion `json:"completed_today"`
 }
 
 type apiV1TaskQuery struct {
@@ -77,13 +104,13 @@ type apiV1TaskOrder struct {
 }
 
 type apiV1SavedView struct {
-	ID        string         `json:"id"`
-	Name      string         `json:"name"`
-	Builtin   bool           `json:"builtin"`
-	Query     apiV1TaskQuery `json:"query"`
-	Order     apiV1TaskOrder `json:"order"`
 	CreatedAt *string        `json:"created_at"`
 	UpdatedAt *string        `json:"updated_at"`
+	Order     apiV1TaskOrder `json:"order"`
+	ID        string         `json:"id"`
+	Name      string         `json:"name"`
+	Query     apiV1TaskQuery `json:"query"`
+	Builtin   bool           `json:"builtin"`
 }
 
 type apiV1CreateTaskRequest struct {
@@ -97,18 +124,18 @@ type apiV1CreateTaskRequest struct {
 type apiV1UpdateTaskRequest struct {
 	Title       apiV1Optional[string] `json:"title"`
 	Description apiV1Optional[string] `json:"description"`
-	Priority    apiV1Optional[int]    `json:"priority"`
 	Assignee    apiV1Optional[string] `json:"assignee"`
-}
-
-type apiV1CommentTaskRequest struct {
-	Body string `json:"body"`
+	Priority    apiV1Optional[int]    `json:"priority"`
+	Top         apiV1Optional[bool]   `json:"top"`
 }
 
 type apiV1CloseTaskRequest struct {
 	Message  string   `json:"message"`
-	Evidence []string `json:"evidence"`
 	Comment  string   `json:"comment"`
+	Evidence []string `json:"evidence"`
+}
+type apiV1CommentTaskRequest struct {
+	Body string `json:"body"`
 }
 
 type apiV1DeleteTaskRequest struct {
@@ -118,9 +145,9 @@ type apiV1DeleteTaskRequest struct {
 // apiV1Optional distinguishes an omitted PATCH field from a JSON null. Null is
 // meaningful for nullable fields such as task priority.
 type apiV1Optional[T any] struct {
+	Value T
 	Set   bool
 	Null  bool
-	Value T
 }
 
 func (o *apiV1Optional[T]) UnmarshalJSON(data []byte) error {
@@ -140,10 +167,92 @@ type apiV1ErrorResponse struct {
 }
 
 type apiV1Error struct {
+	Details   map[string]any `json:"details,omitempty"`
 	Code      string         `json:"code"`
 	Message   string         `json:"message"`
 	RequestID string         `json:"request_id"`
-	Details   map[string]any `json:"details,omitempty"`
+}
+
+func apiV1JSONField(name string, value any) ([]byte, error) {
+	key, err := json.Marshal(name)
+	if err != nil {
+		return nil, err
+	}
+	encoded, err := json.Marshal(value)
+	if err != nil {
+		return nil, err
+	}
+	field := make([]byte, 0, len(key)+1+len(encoded))
+	field = append(field, key...)
+	field = append(field, ':')
+	field = append(field, encoded...)
+	return field, nil
+}
+
+func marshalAPIJSONObject(fields ...[]byte) []byte {
+	body := bytes.Join(fields, []byte{','})
+	result := make([]byte, 0, len(body)+2)
+	result = append(result, '{')
+	result = append(result, body...)
+	result = append(result, '}')
+	return result
+}
+
+func marshalAPIJSONFields(names []string, values []any) ([]byte, error) {
+	fields := make([][]byte, 0, len(names))
+	for i, name := range names {
+		encoded, err := apiV1JSONField(name, values[i])
+		if err != nil {
+			return nil, err
+		}
+		fields = append(fields, encoded)
+	}
+	return marshalAPIJSONObject(fields...), nil
+}
+
+func (item apiV1Project) MarshalJSON() ([]byte, error) {
+	return marshalAPIJSONFields(
+		[]string{"id", "name", "description", "active_task_count", "created_at", "updated_at"},
+		[]any{item.ID, item.Name, item.Description, item.ActiveTaskCount, item.CreatedAt, item.UpdatedAt},
+	)
+}
+
+func (item apiV1Task) MarshalJSON() ([]byte, error) {
+	return marshalAPIJSONFields(
+		[]string{"id", "project_id", "title", "description", "status", "priority", "assignee", "top", "created_at", "updated_at"},
+		[]any{item.ID, item.ProjectID, item.Title, item.Description, item.Status, item.Priority, item.Assignee, item.Top, item.CreatedAt, item.UpdatedAt},
+	)
+}
+
+func (item apiV1TodayCompletion) MarshalJSON() ([]byte, error) {
+	return marshalAPIJSONFields(
+		[]string{"all", "top", "day_start", "day_end"},
+		[]any{item.All, item.Top, item.DayStart, item.DayEnd},
+	)
+}
+
+func (item apiV1TodayResponse) MarshalJSON() ([]byte, error) {
+	return marshalAPIJSONFields(
+		[]string{"focus", "top_tasks", "completed_today"},
+		[]any{item.Focus, item.TopTasks, item.CompletedToday},
+	)
+}
+
+func (item apiV1SavedView) MarshalJSON() ([]byte, error) {
+	return marshalAPIJSONFields(
+		[]string{"id", "name", "builtin", "query", "order", "created_at", "updated_at"},
+		[]any{item.ID, item.Name, item.Builtin, item.Query, item.Order, item.CreatedAt, item.UpdatedAt},
+	)
+}
+
+func (item apiV1Error) MarshalJSON() ([]byte, error) {
+	names := []string{"code", "message", "request_id"}
+	values := []any{item.Code, item.Message, item.RequestID}
+	if len(item.Details) > 0 {
+		names = append(names, "details")
+		values = append(values, item.Details)
+	}
+	return marshalAPIJSONFields(names, values)
 }
 
 func apiV1ProjectFromDomain(item project.Project) apiV1Project {
@@ -157,7 +266,7 @@ func apiV1TaskFromDomain(item project.Task) apiV1Task {
 	return apiV1Task{
 		ID: item.ID, ProjectID: item.ProjectID, Title: item.Title,
 		Description: item.Description, Status: item.Status, Priority: item.Priority,
-		Assignee: item.Assignee, CreatedAt: apiV1Time(item.CreatedAt), UpdatedAt: apiV1Time(item.UpdatedAt),
+		Assignee: item.Assignee, Top: apiV1IsTopTask(item), CreatedAt: apiV1Time(item.CreatedAt), UpdatedAt: apiV1Time(item.UpdatedAt),
 	}
 }
 
@@ -261,6 +370,8 @@ func apiV1ServiceError(err error) (int, string, string) {
 		return http.StatusRequestTimeout, "request_canceled", "The request was canceled."
 	case errors.Is(err, project.ErrProviderNotFound):
 		return http.StatusServiceUnavailable, "provider_unavailable", "The configured task provider is unavailable."
+	case errors.Is(err, errAPIV1RegistryUnavailable):
+		return http.StatusServiceUnavailable, "registry_unavailable", "The local registry is unavailable."
 	default:
 		return http.StatusBadGateway, "provider_failure", "The task provider could not complete the request."
 	}

@@ -47,12 +47,12 @@ func TestProjectLifecyclePersists(t *testing.T) {
 	if updated.Name != "Facets Dashboard" || updated.Slug != "dashboard" {
 		t.Fatalf("UpdateProject() = %#v", updated)
 	}
-	if _, err := store.ProjectBySlug(ctx, "facets"); !errors.Is(err, ErrNotFound) {
-		t.Fatalf("ProjectBySlug(old slug) error = %v, want ErrNotFound", err)
+	if _, lookupErr := store.ProjectBySlug(ctx, "facets"); !errors.Is(lookupErr, ErrNotFound) {
+		t.Fatalf("ProjectBySlug(old slug) error = %v, want ErrNotFound", lookupErr)
 	}
 
-	if err := store.Close(); err != nil {
-		t.Fatalf("Close() error = %v", err)
+	if closeErr := store.Close(); closeErr != nil {
+		t.Fatalf("Close() error = %v", closeErr)
 	}
 	store = openTestStore(t, ctx, path)
 
@@ -200,14 +200,14 @@ func TestOpenRejectsNewerSchema(t *testing.T) {
 		t.Fatalf("sql.Open() error = %v", err)
 	}
 	var journalMode string
-	if err := db.QueryRowContext(ctx, "PRAGMA journal_mode = DELETE").Scan(&journalMode); err != nil {
-		t.Fatalf("set journal_mode error = %v", err)
+	if journalErr := db.QueryRowContext(ctx, "PRAGMA journal_mode = DELETE").Scan(&journalMode); journalErr != nil {
+		t.Fatalf("set journal_mode error = %v", journalErr)
 	}
-	if _, err := db.ExecContext(ctx, fmt.Sprintf("PRAGMA user_version = %d", schemaVersion+1)); err != nil {
-		t.Fatalf("set user_version error = %v", err)
+	if _, schemaErr := db.ExecContext(ctx, fmt.Sprintf("PRAGMA user_version = %d", schemaVersion+1)); schemaErr != nil {
+		t.Fatalf("set user_version error = %v", schemaErr)
 	}
-	if err := db.Close(); err != nil {
-		t.Fatalf("Close() error = %v", err)
+	if closeErr := db.Close(); closeErr != nil {
+		t.Fatalf("Close() error = %v", closeErr)
 	}
 
 	_, err = Open(ctx, path)
@@ -219,7 +219,11 @@ func TestOpenRejectsNewerSchema(t *testing.T) {
 	if err != nil {
 		t.Fatalf("reopen future database error = %v", err)
 	}
-	defer db.Close()
+	t.Cleanup(func() {
+		if err := db.Close(); err != nil {
+			t.Errorf("Close() error = %v", err)
+		}
+	})
 	if err := db.QueryRowContext(ctx, "PRAGMA journal_mode").Scan(&journalMode); err != nil {
 		t.Fatalf("read journal_mode error = %v", err)
 	}
@@ -237,11 +241,11 @@ func TestOpenRejectsNegativeSchemaVersion(t *testing.T) {
 	if err != nil {
 		t.Fatalf("sql.Open() error = %v", err)
 	}
-	if _, err := db.ExecContext(ctx, "PRAGMA user_version = -1"); err != nil {
-		t.Fatalf("set user_version error = %v", err)
+	if _, schemaErr := db.ExecContext(ctx, "PRAGMA user_version = -1"); schemaErr != nil {
+		t.Fatalf("set user_version error = %v", schemaErr)
 	}
-	if err := db.Close(); err != nil {
-		t.Fatalf("Close() error = %v", err)
+	if closeErr := db.Close(); closeErr != nil {
+		t.Fatalf("Close() error = %v", closeErr)
 	}
 
 	_, err = Open(ctx, path)
@@ -277,8 +281,8 @@ func TestProjectRegistrySyncPreservesLocalMetadata(t *testing.T) {
 	if updated.Metadata["directory"] != "/tmp/demo" {
 		t.Fatalf("updated metadata = %#v", updated.Metadata)
 	}
-	if err := store.SyncProjects(ctx, "kata", []project.Project{{ID: "demo", Name: "Renamed", Metadata: map[string]any{"remote": "v2"}}}); err != nil {
-		t.Fatalf("SyncProjects(second) error = %v", err)
+	if syncErr := store.SyncProjects(ctx, "kata", []project.Project{{ID: "demo", Name: "Renamed", Metadata: map[string]any{"remote": "v2"}}}); syncErr != nil {
+		t.Fatalf("SyncProjects(second) error = %v", syncErr)
 	}
 	final, err := store.RegisteredProject(ctx, "kata", "demo")
 	if err != nil {
@@ -365,8 +369,8 @@ func TestProjectDisabledStatePersistsAcrossSync(t *testing.T) {
 	}
 	disabledAt := *disabled.DisabledAt
 
-	if err := store.SyncProjects(ctx, "kata", []project.Project{{ID: "demo", Name: "Renamed", Metadata: map[string]any{"remote": "v2"}}}); err != nil {
-		t.Fatalf("SyncProjects(second) error = %v", err)
+	if syncErr := store.SyncProjects(ctx, "kata", []project.Project{{ID: "demo", Name: "Renamed", Metadata: map[string]any{"remote": "v2"}}}); syncErr != nil {
+		t.Fatalf("SyncProjects(second) error = %v", syncErr)
 	}
 	current, err := store.RegisteredProject(ctx, "kata", "demo")
 	if err != nil {
@@ -406,8 +410,8 @@ func TestDayFocusPersistsAndResolvesByLocalDay(t *testing.T) {
 	if created.Focus != "Finish the release" || !created.CreatedAt.Equal(first.UTC()) || !created.DayStart.Equal(time.Date(2026, 8, 16, 4, 0, 0, 0, time.UTC)) {
 		t.Fatalf("CreateDayFocus(first) = %#v", created)
 	}
-	if _, err := store.CreateDayFocus(ctx, "Ship the release", second); err != nil {
-		t.Fatalf("CreateDayFocus(second) error = %v", err)
+	if _, createErr := store.CreateDayFocus(ctx, "Ship the release", second); createErr != nil {
+		t.Fatalf("CreateDayFocus(second) error = %v", createErr)
 	}
 
 	current, err := store.CurrentDayFocus(ctx, time.Date(2026, 8, 16, 23, 0, 0, 0, location))
@@ -417,20 +421,20 @@ func TestDayFocusPersistsAndResolvesByLocalDay(t *testing.T) {
 	if current.Focus != "Ship the release" || current.ID == created.ID {
 		t.Fatalf("CurrentDayFocus(current day) = %#v", current)
 	}
-	if _, err := store.CurrentDayFocus(ctx, time.Date(2026, 8, 17, 0, 1, 0, 0, location)); !errors.Is(err, ErrNotFound) {
-		t.Fatalf("CurrentDayFocus(next day) error = %v, want ErrNotFound", err)
+	if _, nextErr := store.CurrentDayFocus(ctx, time.Date(2026, 8, 17, 0, 1, 0, 0, location)); !errors.Is(nextErr, ErrNotFound) {
+		t.Fatalf("CurrentDayFocus(next day) error = %v, want ErrNotFound", nextErr)
 	}
 
 	var count int
-	if err := store.db.QueryRowContext(ctx, "SELECT count(*) FROM day_focus").Scan(&count); err != nil {
-		t.Fatalf("count day_focus rows error = %v", err)
+	if countErr := store.db.QueryRowContext(ctx, "SELECT count(*) FROM day_focus").Scan(&count); countErr != nil {
+		t.Fatalf("count day_focus rows error = %v", countErr)
 	}
 	if count != 3 {
 		t.Fatalf("day_focus row count = %d, want 3", count)
 	}
 
-	if err := store.Close(); err != nil {
-		t.Fatalf("Close() error = %v", err)
+	if closeErr := store.Close(); closeErr != nil {
+		t.Fatalf("Close() error = %v", closeErr)
 	}
 	store = openTestStore(t, ctx, path)
 	persisted, err := store.CurrentDayFocus(ctx, second)
@@ -474,8 +478,8 @@ func TestSavedViewLifecyclePersists(t *testing.T) {
 	if created.ID != view.ID || created.Name != view.Name || created.CreatedAt.IsZero() || created.UpdatedAt.IsZero() {
 		t.Fatalf("CreateSavedView() = %#v", created)
 	}
-	if _, err := store.CreateSavedView(ctx, project.SavedView{ID: "view-2", Name: "mine"}); !errors.Is(err, project.ErrConflict) {
-		t.Fatalf("CreateSavedView(duplicate name) error = %v, want ErrConflict", err)
+	if _, duplicateErr := store.CreateSavedView(ctx, project.SavedView{ID: "view-2", Name: "mine"}); !errors.Is(duplicateErr, project.ErrConflict) {
+		t.Fatalf("CreateSavedView(duplicate name) error = %v, want ErrConflict", duplicateErr)
 	}
 
 	name := "Assigned"
@@ -488,8 +492,8 @@ func TestSavedViewLifecyclePersists(t *testing.T) {
 		t.Fatalf("UpdateSavedView() = %#v", updated)
 	}
 
-	if err := store.Close(); err != nil {
-		t.Fatalf("Close() error = %v", err)
+	if closeErr := store.Close(); closeErr != nil {
+		t.Fatalf("Close() error = %v", closeErr)
 	}
 	store = openTestStore(t, ctx, path)
 	views, err := store.ListSavedViews(ctx)
@@ -539,8 +543,8 @@ func TestVersionTwoMigrationPreservesProjectRegistry(t *testing.T) {
 	if err != nil {
 		t.Fatalf("seed version 2 database: %v", err)
 	}
-	if err := db.Close(); err != nil {
-		t.Fatalf("close seed database: %v", err)
+	if closeErr := db.Close(); closeErr != nil {
+		t.Fatalf("close seed database: %v", closeErr)
 	}
 
 	store := openTestStore(t, ctx, path)
@@ -565,6 +569,10 @@ func openTestStore(t *testing.T, ctx context.Context, path string) *Store {
 	if err != nil {
 		t.Fatalf("Open() error = %v", err)
 	}
-	t.Cleanup(func() { _ = store.Close() })
+	t.Cleanup(func() {
+		if err := store.Close(); err != nil {
+			t.Errorf("Close() error = %v", err)
+		}
+	})
 	return store
 }

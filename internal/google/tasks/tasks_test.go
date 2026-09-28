@@ -48,20 +48,28 @@ func TestClientTaskCRUDAndPagination(t *testing.T) {
 			listRequests = append(listRequests, r.URL.Query().Get("pageToken"))
 			w.Header().Set("Content-Type", "application/json")
 			if r.URL.Query().Get("pageToken") == "next" {
-				_, _ = w.Write([]byte(`{"items":[{"id":"list-2","title":"Later"}]}`))
+				if _, err := w.Write([]byte(`{"items":[{"id":"list-2","title":"Later"}]}`)); err != nil {
+					t.Errorf("write response: %v", err)
+				}
 				return
 			}
-			_, _ = w.Write([]byte(`{"items":[{"id":"list-1","title":"Today"}],"nextPageToken":"next"}`))
+			if _, err := w.Write([]byte(`{"items":[{"id":"list-1","title":"Today"}],"nextPageToken":"next"}`)); err != nil {
+				t.Errorf("write response: %v", err)
+			}
 		case r.Method == http.MethodPost && r.URL.Path == "/tasks/v1/lists/list-1/tasks":
 			if err := json.NewDecoder(r.Body).Decode(&created); err != nil {
 				t.Errorf("decode create: %v", err)
 			}
 			created.ID, created.Status = "task-1", "needsAction"
 			w.Header().Set("Content-Type", "application/json")
-			_ = json.NewEncoder(w).Encode(created)
+			if err := json.NewEncoder(w).Encode(created); err != nil {
+				t.Errorf("encode response: %v", err)
+			}
 		case r.Method == http.MethodGet && r.URL.Path == "/tasks/v1/lists/list-1/tasks/task-1":
 			w.Header().Set("Content-Type", "application/json")
-			_ = json.NewEncoder(w).Encode(googleTask{ID: "task-1", Title: "Read", Notes: "old", Status: "needsAction"})
+			if err := json.NewEncoder(w).Encode(googleTask{ID: "task-1", Title: "Read", Notes: "old", Status: "needsAction"}); err != nil {
+				t.Errorf("encode response: %v", err)
+			}
 		case r.Method == http.MethodPatch && r.URL.Path == "/tasks/v1/lists/list-1/tasks/task-1":
 			var patch googleTask
 			if err := json.NewDecoder(r.Body).Decode(&patch); err != nil {
@@ -69,7 +77,9 @@ func TestClientTaskCRUDAndPagination(t *testing.T) {
 			}
 			w.Header().Set("Content-Type", "application/json")
 			patch.ID, patch.Status = "task-1", "completed"
-			_ = json.NewEncoder(w).Encode(patch)
+			if err := json.NewEncoder(w).Encode(patch); err != nil {
+				t.Errorf("encode response: %v", err)
+			}
 		case r.Method == http.MethodDelete && r.URL.Path == "/tasks/v1/lists/list-1/tasks/task-1":
 			w.WriteHeader(http.StatusNoContent)
 		default:
@@ -115,13 +125,22 @@ func TestUpdateTaskPreservesReferenceAndClearsDue(t *testing.T) {
 		switch r.Method {
 		case http.MethodGet:
 			w.Header().Set("Content-Type", "application/json")
-			_ = json.NewEncoder(w).Encode(googleTask{ID: "task-1", Notes: "old\nfacets-ref: facets://project/demo/task/T-1", Due: "2026-08-04T00:00:00Z"})
+			if err := json.NewEncoder(w).Encode(googleTask{ID: "task-1", Notes: "old\nfacets-ref: facets://project/demo/task/T-1", Due: "2026-08-04T00:00:00Z"}); err != nil {
+				t.Errorf("encode response: %v", err)
+			}
 		case http.MethodPatch:
 			if err := json.NewDecoder(r.Body).Decode(&patch); err != nil {
 				t.Fatal(err)
 			}
 			w.Header().Set("Content-Type", "application/json")
-			_ = json.NewEncoder(w).Encode(googleTask{ID: "task-1", Notes: patch["notes"].(string)})
+			notes, ok := patch["notes"].(string)
+			if !ok {
+				t.Errorf("notes payload has type %T, want string", patch["notes"])
+				return
+			}
+			if err := json.NewEncoder(w).Encode(googleTask{ID: "task-1", Notes: notes}); err != nil {
+				t.Errorf("encode response: %v", err)
+			}
 		default:
 			http.NotFound(w, r)
 		}
@@ -135,7 +154,11 @@ func TestUpdateTaskPreservesReferenceAndClearsDue(t *testing.T) {
 	if _, err := client.UpdateTask(context.Background(), "task-1", TaskPatch{Notes: &notes, ClearDue: true}); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(patch["notes"].(string), "facets://project/demo/task/T-1") {
+	notes, ok := patch["notes"].(string)
+	if !ok {
+		t.Fatalf("notes payload has type %T, want string", patch["notes"])
+	}
+	if !strings.Contains(notes, "facets://project/demo/task/T-1") {
 		t.Fatalf("reference was dropped: %#v", patch)
 	}
 	if value, ok := patch["due"]; !ok || value != nil {
@@ -149,7 +172,9 @@ func TestClientEscapesResourceIDsOnce(t *testing.T) {
 			t.Errorf("RawPath = %q", r.URL.RawPath)
 		}
 		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(googleTask{ID: "task/1", Status: string(StatusOpen)})
+		if err := json.NewEncoder(w).Encode(googleTask{ID: "task/1", Status: string(StatusOpen)}); err != nil {
+			t.Errorf("encode response: %v", err)
+		}
 	}))
 	defer server.Close()
 	client, err := New(Config{BaseURL: server.URL, ListID: "list/1", TokenSource: StaticTokenSource("token")})
@@ -167,7 +192,9 @@ func TestSyncDuePeriodicalsReopensExistingTasks(t *testing.T) {
 		requests++
 		if r.Method == http.MethodGet {
 			w.Header().Set("Content-Type", "application/json")
-			_, _ = w.Write([]byte(`{"items":[{"id":"remote-1","title":"Old","notes":"facets-ref: facets://periodical/meditate","status":"completed"}]}`))
+			if _, err := w.Write([]byte(`{"items":[{"id":"remote-1","title":"Old","notes":"facets-ref: facets://periodical/meditate","status":"completed"}]}`)); err != nil {
+				t.Errorf("write response: %v", err)
+			}
 			return
 		}
 		if r.Method == http.MethodPatch {
@@ -179,7 +206,9 @@ func TestSyncDuePeriodicalsReopensExistingTasks(t *testing.T) {
 				t.Errorf("periodical patch = %#v", patch)
 			}
 			w.Header().Set("Content-Type", "application/json")
-			_ = json.NewEncoder(w).Encode(googleTask{ID: "remote-1", Title: patch.Title, Notes: patch.Notes, Status: patch.Status})
+			if err := json.NewEncoder(w).Encode(googleTask{ID: "remote-1", Title: patch.Title, Notes: patch.Notes, Status: patch.Status}); err != nil {
+				t.Errorf("encode response: %v", err)
+			}
 			return
 		}
 		http.NotFound(w, r)
@@ -203,7 +232,7 @@ func TestReconcileCompletedProjectTask(t *testing.T) {
 	if err != nil || len(applied) != 1 || provider.patch.Status == nil || *provider.patch.Status != project.StatusClosed {
 		t.Fatalf("ReconcileCompleted() = %#v, patch=%#v, err=%v", applied, provider.patch, err)
 	}
-	if provider.patch.Completion == nil || provider.patch.Completion.Evidence[0] != "remote-1" {
+	if provider.patch.Completion == nil || len(provider.patch.Completion.Evidence) == 0 || provider.patch.Completion.Evidence[0] != "remote-1" {
 		t.Fatalf("completion = %#v", provider.patch.Completion)
 	}
 }
@@ -211,7 +240,9 @@ func TestReconcileCompletedProjectTask(t *testing.T) {
 func TestAPIError(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusUnauthorized)
-		_, _ = w.Write([]byte(`{"error":{"message":"invalid token"}}`))
+		if _, err := w.Write([]byte(`{"error":{"message":"invalid token"}}`)); err != nil {
+			t.Errorf("write response: %v", err)
+		}
 	}))
 	defer server.Close()
 	client, err := New(Config{BaseURL: server.URL, ListID: "list-1", TokenSource: StaticTokenSource("token")})

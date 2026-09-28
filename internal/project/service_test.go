@@ -143,17 +143,16 @@ func TestServiceRejectsInvalidCloseEvidence(t *testing.T) {
 }
 
 type serviceProviderStub struct {
-	projects []Project
-	tasks    []Task
-	task     Task
-
-	listProjectID   string
 	listFilter      TaskFilter
-	createCalls     int
-	updateCalls     int
+	task            Task
+	patch           TaskPatch
+	listProjectID   string
 	updateProjectID string
 	updateTaskID    string
-	patch           TaskPatch
+	projects        []Project
+	tasks           []Task
+	createCalls     int
+	updateCalls     int
 }
 
 func (*serviceProviderStub) Name() string { return "stub" }

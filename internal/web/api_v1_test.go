@@ -164,10 +164,10 @@ func TestAPIV1ServiceErrorMapping(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		name   string
 		err    error
-		status int
+		name   string
 		code   string
+		status int
 	}{
 		{name: "invalid document", err: errAPIV1InvalidRequest, status: http.StatusBadRequest, code: "invalid_request"},
 		{name: "media type", err: errAPIV1UnsupportedMediaType, status: http.StatusUnsupportedMediaType, code: "unsupported_media_type"},
@@ -211,13 +211,13 @@ func TestAPIV1DTOsExcludeProviderMetadataAndNormalizeTime(t *testing.T) {
 	priority := 2
 	taskDTO := apiV1TaskFromDomain(project.Task{
 		ID: "t1", ProjectID: "facets", Title: "Ship", Description: "Body", Status: project.StatusOpen,
-		Priority: &priority, Assignee: "bruce", Metadata: map[string]any{"provider_secret": true}, UpdatedAt: created,
+		Priority: &priority, Assignee: "bruce", Metadata: map[string]any{"facets.top": "true", "provider_secret": true}, UpdatedAt: created,
 	})
 	taskJSON, err := json.Marshal(taskDTO)
 	if err != nil {
 		t.Fatalf("marshal task: %v", err)
 	}
-	wantTask := `{"id":"t1","project_id":"facets","title":"Ship","description":"Body","status":"open","priority":2,"assignee":"bruce","created_at":null,"updated_at":"2026-08-12T12:30:00.000000123Z"}`
+	wantTask := `{"id":"t1","project_id":"facets","title":"Ship","description":"Body","status":"open","priority":2,"assignee":"bruce","top":true,"created_at":null,"updated_at":"2026-08-12T12:30:00.000000123Z"}`
 	if string(taskJSON) != wantTask {
 		t.Fatalf("task JSON = %s", taskJSON)
 	}
@@ -261,6 +261,20 @@ func TestAPIV1PatchDistinguishesMissingNullAndValue(t *testing.T) {
 	}
 	if !request.Priority.Set || !request.Priority.Null {
 		t.Fatalf("priority = %#v", request.Priority)
+	}
+	var topRequest apiV1UpdateTaskRequest
+	if err := json.Unmarshal([]byte(`{"top":true}`), &topRequest); err != nil {
+		t.Fatalf("unmarshal top patch: %v", err)
+	}
+	topPatch, err := topRequest.taskPatch()
+	if err != nil || topPatch.Metadata["facets.top"] != "true" {
+		t.Fatalf("top patch = %#v, %v", topPatch, err)
+	}
+	if err := json.Unmarshal([]byte(`{"top":null}`), &topRequest); err != nil {
+		t.Fatalf("unmarshal null top patch: %v", err)
+	}
+	if _, err := topRequest.taskPatch(); !errors.Is(err, project.ErrInvalid) {
+		t.Fatalf("null top patch error = %v, want project.ErrInvalid", err)
 	}
 }
 

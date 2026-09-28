@@ -18,22 +18,22 @@ import (
 
 type fakeProvider struct {
 	name               string
-	projects           []project.Project
-	tasks              []project.Task
-	tasksByProject     map[string][]project.Task
 	err                error
+	created            project.TaskInput
+	patch              project.TaskPatch
 	listProjectID      string
 	listFilter         project.TaskFilter
 	createdProjectID   string
-	created            project.TaskInput
 	updatedProjectID   string
 	updatedID          string
-	patch              project.TaskPatch
 	commentedProjectID string
 	commentedID        string
 	commentBody        string
 	deletedProjectID   string
 	deletedID          string
+	tasksByProject     map[string][]project.Task
+	tasks              []project.Task
+	projects           []project.Project
 }
 
 func (f *fakeProvider) Name() string {
@@ -119,8 +119,8 @@ func runCLI(provider *fakeProvider, cwd string, env map[string]string, args ...s
 }
 
 type fakeActivitySource struct {
-	activity status.Activity
 	err      error
+	activity status.Activity
 }
 
 func (f fakeActivitySource) Summarize(_ context.Context, _ string, _ time.Time) (status.Activity, error) {
@@ -170,7 +170,7 @@ func TestFocusCommandPersistsAndShows(t *testing.T) {
 	if err != nil {
 		t.Fatalf("store.Open() error = %v", err)
 	}
-	defer registry.Close()
+	t.Cleanup(func() { _ = registry.Close() })
 
 	var stdout, stderr bytes.Buffer
 	app := App{ProjectStore: registry, Stdout: &stdout, Stderr: &stderr, Env: map[string]string{}}
@@ -218,7 +218,7 @@ func TestTodayCommandPromptsInteractivelyAndReportsSummary(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer registry.Close()
+	t.Cleanup(func() { _ = registry.Close() })
 
 	var stdout, stderr bytes.Buffer
 	nonInteractive := App{Provider: provider, ProjectStore: registry, Stdout: &stdout, Stderr: &stderr, Stdin: strings.NewReader("ignored\n"), Interactive: func() bool { return false }, Env: map[string]string{}}
@@ -330,8 +330,8 @@ func TestTaskListTOONJSONFieldsAndEmptyState(t *testing.T) {
 	}
 	var decoded struct {
 		Project string           `json:"project"`
-		Count   int              `json:"count"`
 		Tasks   []map[string]any `json:"tasks"`
+		Count   int              `json:"count"`
 	}
 	if err := json.Unmarshal([]byte(stdout), &decoded); err != nil {
 		t.Fatalf("invalid JSON: %v\n%s", err, stdout)
@@ -376,7 +376,7 @@ func TestTaskListProjectFlagsRespectDisabledProjects(t *testing.T) {
 	if err != nil {
 		t.Fatalf("store.Open() error = %v", err)
 	}
-	defer registry.Close()
+	t.Cleanup(func() { _ = registry.Close() })
 	if err := registry.SyncProjects(context.Background(), provider.Name(), provider.projects); err != nil {
 		t.Fatalf("SyncProjects() error = %v", err)
 	}
@@ -719,7 +719,7 @@ func TestProjectDisableEnableAndListAll(t *testing.T) {
 	if err != nil {
 		t.Fatalf("store.Open() error = %v", err)
 	}
-	defer registry.Close()
+	t.Cleanup(func() { _ = registry.Close() })
 
 	var stdout, stderr bytes.Buffer
 	app := App{Provider: provider, ProjectStore: registry, Stdout: &stdout, Stderr: &stderr, Env: map[string]string{}}
@@ -763,7 +763,7 @@ func TestProjectRegistrySetAndUnknownActivity(t *testing.T) {
 	if err != nil {
 		t.Fatalf("store.Open() error = %v", err)
 	}
-	defer registry.Close()
+	t.Cleanup(func() { _ = registry.Close() })
 
 	var stdout, stderr bytes.Buffer
 	app := App{
@@ -850,19 +850,19 @@ func TestProjectShowIncludesDeterministicStatusSummary(t *testing.T) {
 	}
 	var decoded struct {
 		Status struct {
-			PeriodDays int    `json:"period_days"`
-			Since      string `json:"since"`
-			Tasks      struct {
+			Since    string `json:"since"`
+			Activity struct {
+				Sessions map[string]any `json:"sessions"`
+				Commits  int            `json:"commits"`
+			} `json:"activity"`
+			Tasks struct {
+				OpenByPriority   map[string]any `json:"open_by_priority"`
+				ClosedByPriority map[string]any `json:"closed_by_priority"`
 				Total            int            `json:"total"`
 				Open             int            `json:"open"`
 				Closed           int            `json:"closed"`
-				OpenByPriority   map[string]any `json:"open_by_priority"`
-				ClosedByPriority map[string]any `json:"closed_by_priority"`
 			} `json:"tasks"`
-			Activity struct {
-				Commits  int            `json:"commits"`
-				Sessions map[string]any `json:"sessions"`
-			} `json:"activity"`
+			PeriodDays int `json:"period_days"`
 		} `json:"status"`
 	}
 	if err := json.Unmarshal([]byte(stdout), &decoded); err != nil {
@@ -951,8 +951,8 @@ func TestTaskBodyTruncationAndFull(t *testing.T) {
 		Task struct {
 			Body string `json:"body"`
 		} `json:"task"`
-		BodyChars int    `json:"body_chars"`
 		Help      string `json:"help"`
+		BodyChars int    `json:"body_chars"`
 	}
 	if err := json.Unmarshal([]byte(stdout), &truncated); err != nil {
 		t.Fatal(err)

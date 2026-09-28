@@ -38,6 +38,7 @@ import facets.mobile.management.ProjectListScreen
 import facets.mobile.management.ProjectManagementController
 import facets.mobile.management.TaskDetailScreen
 import facets.mobile.management.TaskEditorScreen
+import facets.mobile.management.TodayScreen
 import facets.mobile.management.rememberConfiguredRepository
 import kotlinx.coroutines.flow.Flow
 
@@ -107,7 +108,16 @@ fun FacetsApp(initialIntent: Intent? = null, intentEvents: Flow<Intent>? = null)
             modifier = Modifier.padding(innerPadding),
         ) {
             composable(TopLevelDestination.HOME.route) {
-                DestinationScreen(TopLevelDestination.HOME, R.string.home_description)
+                if (controller == null) {
+                    ProjectManagementRootFallback("Connect a server in Settings to see today's focus and top tasks.")
+                } else {
+                    TodayScreen(
+                        controller = controller,
+                        onOpenTask = { projectId, taskId ->
+                            navController.navigate(FacetsRouteContract.taskNavigationRoute(projectId, taskId))
+                        },
+                    )
+                }
             }
             composable(TopLevelDestination.TASKS.route) {
                 DestinationScreen(TopLevelDestination.TASKS, R.string.tasks_description)

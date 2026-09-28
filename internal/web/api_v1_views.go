@@ -16,15 +16,15 @@ type apiV1TasksResponse struct {
 }
 
 type apiV1CreateSavedViewRequest struct {
+	Order apiV1TaskOrder `json:"order"`
 	Name  string         `json:"name"`
 	Query apiV1TaskQuery `json:"query"`
-	Order apiV1TaskOrder `json:"order"`
 }
 
 type apiV1UpdateSavedViewRequest struct {
+	Order apiV1Optional[apiV1TaskOrder] `json:"order"`
 	Name  apiV1Optional[string]         `json:"name"`
 	Query apiV1Optional[apiV1TaskQuery] `json:"query"`
-	Order apiV1Optional[apiV1TaskOrder] `json:"order"`
 }
 
 func (s *server) apiV1Views(w http.ResponseWriter, r *http.Request) {

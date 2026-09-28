@@ -34,7 +34,11 @@ func TestAppDiscoversMappedProjectDirectory(t *testing.T) {
 	if err != nil {
 		t.Fatalf("store.Open() error = %v", err)
 	}
-	defer registry.Close()
+	defer func() {
+		if err := registry.Close(); err != nil {
+			t.Errorf("registry.Close() error = %v", err)
+		}
+	}()
 	if err := registry.SyncProjects(ctx, "kata", []project.Project{
 		{ID: "parent", Name: "Parent", Metadata: map[string]any{"directory": mappedRoot}},
 		{ID: "nested", Name: "Nested", Metadata: map[string]any{"directory": nestedRoot}},

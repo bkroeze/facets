@@ -42,6 +42,7 @@ internal fun Task.toEntity(): TaskEntity = TaskEntity(
     assignee = assignee,
     createdAtEpochMillis = createdAt.toEpochMilli(),
     updatedAtEpochMillis = updatedAt.toEpochMilli(),
+    top = top,
 )
 
 internal fun SavedView.toEntity(): SavedViewEntity = SavedViewEntity(
@@ -76,6 +77,7 @@ internal fun TaskEntity.toDomain(): Task = Task(
     assignee = assignee,
     createdAt = Instant.ofEpochMilli(createdAtEpochMillis),
     updatedAt = Instant.ofEpochMilli(updatedAtEpochMillis),
+    top = top,
 )
 
 internal fun SavedViewEntity.toDomain(): SavedView = SavedView(

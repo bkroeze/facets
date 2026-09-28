@@ -9,13 +9,16 @@ import facets.mobile.data.model.SavedView
 import facets.mobile.data.model.Task
 import facets.mobile.data.model.TaskStatus
 import facets.mobile.data.model.TaskUpdateField
+import facets.mobile.data.model.TodayCompletion
+import facets.mobile.data.model.TodayFocus
+import facets.mobile.data.model.TodaySnapshot
+import facets.mobile.data.model.TodayTask
 import facets.mobile.data.model.UpdateTaskRequest
 import facets.mobile.data.model.UpdateViewRequest
 import facets.mobile.data.model.ViewOrder
 import facets.mobile.data.model.ViewOrderDirection
 import facets.mobile.data.model.ViewOrderField
 import facets.mobile.data.model.ViewQuery
-import facets.mobile.data.model.ViewUpdateField
 import facets.mobile.data.transport.MalformedResponseException
 import java.time.Instant
 import java.time.OffsetDateTime
@@ -58,9 +61,9 @@ internal fun TaskDto.toDomain(): Task {
         assignee = assignee,
         createdAt = createdAt.toApiInstant("created_at"),
         updatedAt = updatedAt.toApiInstant("updated_at"),
+        top = top,
     )
 }
-
 internal fun TaskStatusDto.toDomain(): TaskStatus = when (this) {
     TaskStatusDto.OPEN -> TaskStatus.OPEN
     TaskStatusDto.CLOSED -> TaskStatus.CLOSED
@@ -139,9 +142,25 @@ internal fun UpdateTaskRequest.toWire(): TaskPatchDto = TaskPatchDto(
     description = description,
     priority = priority,
     assignee = assignee,
+    top = top,
     presentFields = presentFields(),
 )
 
+internal fun TodayFocusDto.toDomain(): TodayFocus =
+    TodayFocus(text = text, dayStart = dayStart.toApiInstant("focus.day_start"))
+
+internal fun TodayDto.toDomain(): TodaySnapshot = TodaySnapshot(
+    focus = focus?.toDomain(),
+    topTasks = topTasks.map {
+        TodayTask(projectId = it.project, projectName = it.projectName, taskId = it.task, title = it.title)
+    },
+    completedToday = TodayCompletion(
+        all = completedToday.all,
+        top = completedToday.top,
+        dayStart = completedToday.dayStart.toApiInstant("completed_today.day_start"),
+        dayEnd = completedToday.dayEnd.toApiInstant("completed_today.day_end"),
+    ),
+)
 internal fun CommentRequest.toWire(): CommentDto = CommentDto(body)
 internal fun CloseTaskRequest.toWire(): CloseTaskDto = CloseTaskDto(message, evidence, comment)
 

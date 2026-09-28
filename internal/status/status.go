@@ -30,25 +30,25 @@ const UnknownSessionCount = -1
 
 // TaskSummary contains task totals and priority buckets.
 type TaskSummary struct {
+	OpenByPriority   map[int]int
+	ClosedByPriority map[int]int
 	Total            int
 	Open             int
 	Closed           int
-	OpenByPriority   map[int]int
-	ClosedByPriority map[int]int
 }
 
 // Activity contains recent commits and session counts.
 type Activity struct {
-	Commits  int
 	Sessions map[string]int
+	Commits  int
 }
 
 // Summary is the status of one project over a period.
 type Summary struct {
-	PeriodDays int
 	Since      time.Time
-	Tasks      TaskSummary
 	Activity   Activity
+	Tasks      TaskSummary
+	PeriodDays int
 }
 
 // Builder creates project status summaries.
@@ -247,7 +247,7 @@ func countSessionDatabaseCandidates(ctx context.Context, home string, databaseNa
 	return 0, nil
 }
 
-func countSessionDatabase(ctx context.Context, home, databaseName, table, timestampColumn, sessionColumn, root string, since time.Time) (int, error) {
+func countSessionDatabase(ctx context.Context, home, databaseName, table, timestampColumn, sessionColumn, root string, since time.Time) (count int, retErr error) {
 	home = strings.TrimSpace(home)
 	if home == "" {
 		return 0, nil
@@ -264,11 +264,15 @@ func countSessionDatabase(ctx context.Context, home, databaseName, table, timest
 	if err != nil {
 		return 0, fmt.Errorf("open %s: %w", path, err)
 	}
-	defer db.Close()
+	defer func() {
+		if closeErr := db.Close(); closeErr != nil && retErr == nil {
+			retErr = fmt.Errorf("close %s: %w", path, closeErr)
+		}
+	}()
 	db.SetMaxOpenConns(1)
 	db.SetMaxIdleConns(1)
-	if err := db.PingContext(ctx); err != nil {
-		return 0, fmt.Errorf("connect %s: %w", path, err)
+	if pingErr := db.PingContext(ctx); pingErr != nil {
+		return 0, fmt.Errorf("connect %s: %w", path, pingErr)
 	}
 
 	query := "SELECT cwd, " + timestampColumn
@@ -280,8 +284,11 @@ func countSessionDatabase(ctx context.Context, home, databaseName, table, timest
 	if err != nil {
 		return 0, fmt.Errorf("query %s: %w", path, err)
 	}
-	defer rows.Close()
-	count := 0
+	defer func() {
+		if closeErr := rows.Close(); closeErr != nil && retErr == nil {
+			retErr = fmt.Errorf("close %s: %w", path, closeErr)
+		}
+	}()
 	var seenSessions map[string]struct{}
 	if sessionColumn != "" {
 		seenSessions = make(map[string]struct{})
@@ -313,9 +320,6 @@ func countSessionDatabase(ctx context.Context, home, databaseName, table, timest
 			seenSessions[sessionID] = struct{}{}
 		}
 		count++
-	}
-	if err := rows.Close(); err != nil {
-		return 0, fmt.Errorf("close %s: %w", path, err)
 	}
 	if err := rows.Err(); err != nil {
 		return 0, fmt.Errorf("iterate %s: %w", path, err)

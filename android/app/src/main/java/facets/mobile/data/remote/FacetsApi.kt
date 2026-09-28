@@ -16,7 +16,10 @@ interface FacetsApi {
 
     @GET("healthz")
     suspend fun health(): Response<ResponseBody>
-
+    @GET("api/v1/today")
+    suspend fun today(): Response<TodayDto>
+    @POST("api/v1/today/focus")
+    suspend fun setTodayFocus(@Body request: SetTodayFocusDto): Response<TodayFocusResponseDto>
     @GET("api/v1/projects")
     suspend fun listProjects(): Response<ProjectListDto>
 

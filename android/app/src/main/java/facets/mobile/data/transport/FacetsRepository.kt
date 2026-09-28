@@ -4,16 +4,18 @@ import facets.mobile.data.model.CloseTaskRequest
 import facets.mobile.data.model.CommentRequest
 import facets.mobile.data.model.CreateTaskRequest
 import facets.mobile.data.model.CreateViewRequest
+import facets.mobile.data.remote.ErrorEnvelopeDto
 import facets.mobile.data.model.HealthStatus
 import facets.mobile.data.model.Project
 import facets.mobile.data.model.SavedView
 import facets.mobile.data.model.Task
 import facets.mobile.data.model.TaskUpdateField
-import facets.mobile.data.model.ViewUpdateField
 import facets.mobile.data.model.TaskListStatus
+import facets.mobile.data.model.TodayFocus
+import facets.mobile.data.model.TodaySnapshot
 import facets.mobile.data.model.UpdateTaskRequest
 import facets.mobile.data.model.UpdateViewRequest
-import facets.mobile.data.remote.ErrorEnvelopeDto
+import facets.mobile.data.model.ViewUpdateField
 import facets.mobile.data.remote.FacetsApi
 import facets.mobile.data.remote.toDomain
 import facets.mobile.data.remote.toWire
@@ -33,6 +35,8 @@ import java.net.UnknownHostException
 interface FacetsRepository {
     suspend fun apiVersion(): String
     suspend fun checkHealth(): HealthStatus
+    suspend fun getToday(): TodaySnapshot
+    suspend fun setTodayFocus(text: String): TodayFocus
     suspend fun listProjects(): List<Project>
     suspend fun getProject(projectId: String): Project
     suspend fun listTasks(projectId: String, viewId: String? = null, status: TaskListStatus? = null): List<Task>
@@ -69,6 +73,9 @@ class RetrofitFacetsRepository(
         return HealthStatus(healthy = true)
     }
 
+    override suspend fun getToday(): TodaySnapshot = execute(api::today) { it.toDomain() }
+    override suspend fun setTodayFocus(text: String): TodayFocus =
+        execute({ api.setTodayFocus(facets.mobile.data.remote.SetTodayFocusDto(text)) }) { it.focus.toDomain() }
     override suspend fun apiVersion(): String = execute(api::apiRoot) { root ->
         if (root.version != API_VERSION) {
             throw FacetsException(FacetsFailure.IncompatibleContract("Expected API version $API_VERSION, got ${root.version}"))

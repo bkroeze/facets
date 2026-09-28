@@ -39,6 +39,7 @@ data class TaskEntity(
     val assignee: String,
     val createdAtEpochMillis: Long,
     val updatedAtEpochMillis: Long,
+    val top: Boolean = false,
 )
 
 @Entity(tableName = "saved_views")

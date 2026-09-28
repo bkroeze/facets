@@ -238,8 +238,8 @@ func TestStylesheetIsEmbedded(t *testing.T) {
 }
 
 type projectSourceStub struct {
-	projects []project.Project
 	err      error
+	projects []project.Project
 }
 
 func (s projectSourceStub) ListProjects(context.Context) ([]project.Project, error) {

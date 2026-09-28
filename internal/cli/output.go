@@ -11,8 +11,8 @@ import (
 )
 
 type field struct {
-	name  string
 	value any
+	name  string
 }
 
 type object []field
@@ -160,9 +160,9 @@ func appendHumanHelp(b *strings.Builder, doc object, indent string) {
 		fmt.Fprintf(b, "%s%s%s%s\n", indent, ansiDim, humanScalar(description), ansiReset)
 	}
 	if options, ok := objectValue(doc, "options"); ok {
-		if table, ok := options.(table); ok {
+		if optionsTable, ok := options.(table); ok {
 			fmt.Fprintf(b, "%s%sOptions:%s\n", indent, ansiBold, ansiReset)
-			appendHumanTable(b, table, len(indent)/2+1)
+			appendHumanTable(b, optionsTable, len(indent)/2+1)
 		}
 	}
 	if examples, ok := objectValue(doc, "examples"); ok {

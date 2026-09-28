@@ -34,6 +34,11 @@ test:
 vet:
     go vet ./...
 
+
+# Run golangci-lint.
+lint:
+    golangci-lint run
+
 # Build the Facets binary under bin/.
 build:
     mkdir -p bin
@@ -87,15 +92,21 @@ install-gui:
 
 # Install the Quickshell panel as an Omarchy Quattro plugin.
 install-quattro:
-    @bin_dir="$HOME/.local/bin"; \
-      plugin_dir="$HOME/.config/omarchy/plugins/facets"; \
+    @set -eu; \
+      config_home="${XDG_CONFIG_HOME:-$HOME/.config}"; \
+      bin_dir="$(go env GOBIN)"; \
+      if [ -z "$bin_dir" ]; then \
+        gopath="$(go env GOPATH)"; \
+        bin_dir="${gopath%%:*}/bin"; \
+      fi; \
+      plugin_dir="$config_home/omarchy/plugins/facets"; \
       mkdir -p "$bin_dir" "$plugin_dir"; \
       GOBIN="$bin_dir" go install ./cmd/facets; \
       install -m 0644 quickshell/facets/manifest.json "$plugin_dir/manifest.json"; \
       install -m 0644 quickshell/facets/FacetsPanel.qml "$plugin_dir/FacetsPanel.qml"; \
       install -m 0644 quickshell/facets/FacetsBarWidget.qml "$plugin_dir/FacetsBarWidget.qml"; \
-      printf 'Installed facets to %s and Quattro plugin to %s\n' \
-        "$bin_dir/facets" "$plugin_dir"; \
+      printf 'Installed facets binary to %s/facets and Quattro plugin to %s\n' \
+        "$bin_dir" "$plugin_dir"; \
       printf 'Run: omarchy-shell shell rescanPlugins && omarchy plugin enable facets --section center && omarchy-restart-shell\n'
 
 # Run formatting, tests, static analysis, and a build.

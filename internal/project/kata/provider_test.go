@@ -14,11 +14,11 @@ import (
 )
 
 type scriptStep struct {
+	err    error
 	binary string
-	args   []string
 	stdout string
 	stderr string
-	err    error
+	args   []string
 }
 
 type scriptedRunner struct {
@@ -213,12 +213,12 @@ func TestTaskCRUDCommandsFiltersAndMapping(t *testing.T) {
 	assertMappedTask(t, tasks[0])
 
 	open := project.StatusOpen
-	if _, err := provider.ListTasks(ctx, "alpha", project.TaskFilter{Status: &open}); err != nil {
-		t.Fatalf("ListTasks open: %v", err)
+	if _, listErr := provider.ListTasks(ctx, "alpha", project.TaskFilter{Status: &open}); listErr != nil {
+		t.Fatalf("ListTasks open: %v", listErr)
 	}
 	closed := project.StatusClosed
-	if _, err := provider.ListTasks(ctx, "alpha", project.TaskFilter{Status: &closed}); err != nil {
-		t.Fatalf("ListTasks closed: %v", err)
+	if _, listErr := provider.ListTasks(ctx, "alpha", project.TaskFilter{Status: &closed}); listErr != nil {
+		t.Fatalf("ListTasks closed: %v", listErr)
 	}
 
 	gotTask, err := provider.GetTask(ctx, "alpha", "op21")
@@ -573,10 +573,10 @@ func TestNotFoundRequiresStructuredExactKind(t *testing.T) {
 
 func TestProjectResponsesRequireProjectAndName(t *testing.T) {
 	tests := []struct {
-		name   string
-		args   []string
-		stdout string
 		call   func(*Provider) error
+		name   string
+		stdout string
+		args   []string
 	}{
 		{
 			name:   "list missing name",
@@ -675,117 +675,117 @@ func TestValidationRejectsInvalidInputBeforeCommands(t *testing.T) {
 	open := project.StatusOpen
 	invalid := project.Status("pending")
 	tests := []struct {
-		name string
 		call func(*Provider) error
+		name string
 	}{
-		{"get project ID", func(p *Provider) error { _, err := p.GetProject(context.Background(), " "); return err }},
-		{"create project name", func(p *Provider) error {
+		{name: "get project ID", call: func(p *Provider) error { _, err := p.GetProject(context.Background(), " "); return err }},
+		{name: "create project name", call: func(p *Provider) error {
 			_, err := p.CreateProject(context.Background(), project.ProjectInput{})
 			return err
 		}},
-		{"create project unsupported fields", func(p *Provider) error {
+		{name: "create project unsupported fields", call: func(p *Provider) error {
 			_, err := p.CreateProject(context.Background(), project.ProjectInput{Name: "alpha", Description: "description"})
 			return err
 		}},
-		{"update project ID", func(p *Provider) error {
+		{name: "update project ID", call: func(p *Provider) error {
 			_, err := p.UpdateProject(context.Background(), "", project.ProjectPatch{Name: new("next")})
 			return err
 		}},
-		{"update project empty patch", func(p *Provider) error {
+		{name: "update project empty patch", call: func(p *Provider) error {
 			_, err := p.UpdateProject(context.Background(), "alpha", project.ProjectPatch{})
 			return err
 		}},
-		{"update project empty name", func(p *Provider) error {
+		{name: "update project empty name", call: func(p *Provider) error {
 			_, err := p.UpdateProject(context.Background(), "alpha", project.ProjectPatch{Name: new(" ")})
 			return err
 		}},
-		{"update project empty metadata replacement", func(p *Provider) error {
+		{name: "update project empty metadata replacement", call: func(p *Provider) error {
 			_, err := p.UpdateProject(context.Background(), "alpha", project.ProjectPatch{Name: new("next"), Metadata: map[string]any{}})
 			if !errors.Is(err, project.ErrUnsupported) {
 				return errors.New("expected ErrUnsupported")
 			}
 			return err
 		}},
-		{"delete project ID", func(p *Provider) error { return p.DeleteProject(context.Background(), "") }},
-		{"list task project ID", func(p *Provider) error {
+		{name: "delete project ID", call: func(p *Provider) error { return p.DeleteProject(context.Background(), "") }},
+		{name: "list task project ID", call: func(p *Provider) error {
 			_, err := p.ListTasks(context.Background(), "", project.TaskFilter{})
 			return err
 		}},
-		{"list task status", func(p *Provider) error {
+		{name: "list task status", call: func(p *Provider) error {
 			_, err := p.ListTasks(context.Background(), "alpha", project.TaskFilter{Status: &invalid})
 			return err
 		}},
-		{"get task project ID", func(p *Provider) error { _, err := p.GetTask(context.Background(), "", "op21"); return err }},
-		{"get task ID", func(p *Provider) error { _, err := p.GetTask(context.Background(), "alpha", ""); return err }},
-		{"create task title", func(p *Provider) error {
+		{name: "get task project ID", call: func(p *Provider) error { _, err := p.GetTask(context.Background(), "", "op21"); return err }},
+		{name: "get task ID", call: func(p *Provider) error { _, err := p.GetTask(context.Background(), "alpha", ""); return err }},
+		{name: "create task title", call: func(p *Provider) error {
 			_, err := p.CreateTask(context.Background(), "alpha", project.TaskInput{Title: " "})
 			return err
 		}},
-		{"create task priority", func(p *Provider) error {
+		{name: "create task priority", call: func(p *Provider) error {
 			_, err := p.CreateTask(context.Background(), "alpha", project.TaskInput{Title: "title", Priority: new(5)})
 			return err
 		}},
-		{"update task empty patch", func(p *Provider) error {
+		{name: "update task empty patch", call: func(p *Provider) error {
 			_, err := p.UpdateTask(context.Background(), "alpha", "op21", project.TaskPatch{})
 			return err
 		}},
-		{"update task invalid title", func(p *Provider) error {
+		{name: "update task invalid title", call: func(p *Provider) error {
 			_, err := p.UpdateTask(context.Background(), "alpha", "op21", project.TaskPatch{Title: new(" ")})
 			return err
 		}},
-		{"update task invalid priority", func(p *Provider) error {
+		{name: "update task invalid priority", call: func(p *Provider) error {
 			_, err := p.UpdateTask(context.Background(), "alpha", "op21", project.TaskPatch{Priority: project.PriorityPatch{Set: true, Value: new(-1)}})
 			return err
 		}},
-		{"update task invalid status", func(p *Provider) error {
+		{name: "update task invalid status", call: func(p *Provider) error {
 			_, err := p.UpdateTask(context.Background(), "alpha", "op21", project.TaskPatch{Status: &invalid})
 			return err
 		}},
-		{"completion without close", func(p *Provider) error {
+		{name: "completion without close", call: func(p *Provider) error {
 			_, err := p.UpdateTask(context.Background(), "alpha", "op21", project.TaskPatch{Status: &open, Completion: &project.Completion{Message: "m", Evidence: []string{"test:x"}}})
 			return err
 		}},
-		{"close without completion", func(p *Provider) error {
+		{name: "close without completion", call: func(p *Provider) error {
 			_, err := p.UpdateTask(context.Background(), "alpha", "op21", project.TaskPatch{Status: &closed})
 			return err
 		}},
-		{"close without message", func(p *Provider) error {
+		{name: "close without message", call: func(p *Provider) error {
 			_, err := p.UpdateTask(context.Background(), "alpha", "op21", project.TaskPatch{Status: &closed, Completion: &project.Completion{Evidence: []string{"test:x"}}})
 			return err
 		}},
-		{"close without evidence", func(p *Provider) error {
+		{name: "close without evidence", call: func(p *Provider) error {
 			_, err := p.UpdateTask(context.Background(), "alpha", "op21", project.TaskPatch{Status: &closed, Completion: &project.Completion{Message: "done"}})
 			return err
 		}},
-		{"close with empty evidence", func(p *Provider) error {
+		{name: "close with empty evidence", call: func(p *Provider) error {
 			_, err := p.UpdateTask(context.Background(), "alpha", "op21", project.TaskPatch{Status: &closed, Completion: &project.Completion{Message: "done", Evidence: []string{" "}}})
 			return err
 		}},
-		{"close with empty comment", func(p *Provider) error {
+		{name: "close with empty comment", call: func(p *Provider) error {
 			_, err := p.UpdateTask(context.Background(), "alpha", "op21", project.TaskPatch{Status: &closed, Completion: &project.Completion{Message: "done", Evidence: []string{"test:x"}, Comment: " "}})
 			return err
 		}},
-		{"update task empty metadata replacement", func(p *Provider) error {
+		{name: "update task empty metadata replacement", call: func(p *Provider) error {
 			_, err := p.UpdateTask(context.Background(), "alpha", "op21", project.TaskPatch{Title: new("next"), Metadata: map[string]any{}})
 			if !errors.Is(err, project.ErrUnsupported) {
 				return errors.New("expected ErrUnsupported")
 			}
 			return err
 		}},
-		{"comment task project ID", func(p *Provider) error {
+		{name: "comment task project ID", call: func(p *Provider) error {
 			_, err := p.CommentTask(context.Background(), "", "op21", "context")
 			return err
 		}},
-		{"comment task ID", func(p *Provider) error {
+		{name: "comment task ID", call: func(p *Provider) error {
 			_, err := p.CommentTask(context.Background(), "alpha", " ", "context")
 			return err
 		}},
-		{"comment task body", func(p *Provider) error {
+		{name: "comment task body", call: func(p *Provider) error {
 			_, err := p.CommentTask(context.Background(), "alpha", "op21", " ")
 			return err
 		}},
-		{"delete task project ID", func(p *Provider) error { return p.DeleteTask(context.Background(), "", "op21") }},
-		{"delete task ID", func(p *Provider) error { return p.DeleteTask(context.Background(), "alpha", "") }},
+		{name: "delete task project ID", call: func(p *Provider) error { return p.DeleteTask(context.Background(), "", "op21") }},
+		{name: "delete task ID", call: func(p *Provider) error { return p.DeleteTask(context.Background(), "alpha", "") }},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {

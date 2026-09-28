@@ -80,10 +80,10 @@ func New(config Config) (*Client, error) {
 
 // APIError describes a non-successful Google Tasks response.
 type APIError struct {
-	StatusCode int
 	Method     string
 	URL        string
 	Message    string
+	StatusCode int
 }
 
 func (e *APIError) Error() string {
@@ -103,17 +103,17 @@ type List struct {
 
 // Task is the provider-neutral subset of a Google Tasks task.
 type Task struct {
+	Due        *time.Time
+	Completed  *time.Time
+	Updated    *time.Time
 	ID         string
 	ETag       string
 	Title      string
 	Notes      string
 	Status     Status
-	Due        *time.Time
-	Completed  *time.Time
-	Updated    *time.Time
+	WebViewURL string
 	Deleted    bool
 	Hidden     bool
-	WebViewURL string
 }
 
 // Status is a Google Tasks lifecycle state.
@@ -126,10 +126,10 @@ const (
 
 // TaskInput creates a task in the configured list.
 type TaskInput struct {
-	Title     string
-	Notes     string
 	Due       *time.Time
 	Reference *Reference
+	Title     string
+	Notes     string
 }
 
 // TaskPatch updates fields that are non-nil. ClearDue removes the due date.
@@ -137,17 +137,17 @@ type TaskPatch struct {
 	Title     *string
 	Notes     *string
 	Due       *time.Time
-	ClearDue  bool
 	Status    *Status
 	Reference *Reference
+	ClearDue  bool
 }
 
 // ListFilter controls task listing and pagination.
 type ListFilter struct {
-	ShowCompleted bool
-	ShowHidden    bool
 	DueBefore     *time.Time
 	MaxResults    int
+	ShowCompleted bool
+	ShowHidden    bool
 }
 
 // Reference identifies the Facets object represented by a remote task.
@@ -252,8 +252,8 @@ func (c *Client) ListLists(ctx context.Context) ([]List, error) {
 	pageToken := ""
 	for {
 		response := struct {
-			Items         []List `json:"items"`
 			NextPageToken string `json:"nextPageToken"`
+			Items         []List `json:"items"`
 		}{}
 		query := url.Values{}
 		if pageToken != "" {
@@ -326,8 +326,8 @@ func (c *Client) ListTasks(ctx context.Context, filter ListFilter) ([]Task, erro
 			query.Set("pageToken", pageToken)
 		}
 		var response struct {
-			Items         []googleTask `json:"items"`
 			NextPageToken string       `json:"nextPageToken"`
+			Items         []googleTask `json:"items"`
 		}
 		if err := c.doJSON(ctx, http.MethodGet, "/tasks/v1/lists/"+url.PathEscape(c.listID)+"/tasks", query, nil, &response); err != nil {
 			return nil, err
@@ -368,7 +368,7 @@ func (c *Client) CreateTask(ctx context.Context, input TaskInput) (Task, error) 
 	}
 	body := googleTask{Title: input.Title, Notes: notes, Due: formatTime(input.Due)}
 	var response googleTask
-	if err := c.doJSON(ctx, http.MethodPost, "/tasks/v1/lists/"+url.PathEscape(c.listID)+"/tasks", nil, body, &response); err != nil {
+	if err = c.doJSON(ctx, http.MethodPost, "/tasks/v1/lists/"+url.PathEscape(c.listID)+"/tasks", nil, body, &response); err != nil {
 		return Task{}, err
 	}
 	return response.toTask()
@@ -413,7 +413,11 @@ func (c *Client) UpdateTask(ctx context.Context, id string, patch TaskPatch) (Ta
 	if patch.Reference != nil {
 		notes := existing.Notes
 		if patch.Notes != nil {
-			notes = body["notes"].(string)
+			updatedNotes, ok := body["notes"].(string)
+			if !ok {
+				return Task{}, errors.New("tasks: notes payload is not a string")
+			}
+			notes = updatedNotes
 		}
 		updatedNotes, err := WithReference(notes, *patch.Reference)
 		if err != nil {
@@ -441,10 +445,10 @@ func (c *Client) DeleteTask(ctx context.Context, id string) error {
 
 // DuePeriodical is a periodical Facets task that is due in a daily list.
 type DuePeriodical struct {
+	Due         time.Time
 	ID          string
 	Title       string
 	Description string
-	Due         time.Time
 }
 
 // DuePeriodicalSource supplies periodical tasks due on a date.
@@ -529,14 +533,13 @@ func ReconcileCompleted(ctx context.Context, provider project.Provider, remote [
 		}
 		status := project.StatusClosed
 		message := "Completed in Google Tasks"
-		updated, err := provider.UpdateTask(ctx, ref.ProjectID, ref.TaskID, project.TaskPatch{
+		_, err = provider.UpdateTask(ctx, ref.ProjectID, ref.TaskID, project.TaskPatch{
 			Status:     &status,
 			Completion: &project.Completion{Message: message, Evidence: []string{item.ID}},
 		})
 		if err != nil {
 			return nil, fmt.Errorf("tasks: complete linked task %s/%s: %w", ref.ProjectID, ref.TaskID, err)
 		}
-		_ = updated
 		applied = append(applied, item)
 	}
 	return applied, nil
@@ -551,9 +554,9 @@ type googleTask struct {
 	Due        string `json:"due,omitempty"`
 	Completed  string `json:"completed,omitempty"`
 	Updated    string `json:"updated,omitempty"`
+	WebViewURL string `json:"webViewLink,omitempty"`
 	Deleted    bool   `json:"deleted,omitempty"`
 	Hidden     bool   `json:"hidden,omitempty"`
-	WebViewURL string `json:"webViewLink,omitempty"`
 }
 
 func (g googleTask) toTask() (Task, error) {
@@ -586,7 +589,7 @@ func (c *Client) taskPath(id string) string {
 	return "/tasks/v1/lists/" + url.PathEscape(c.listID) + "/tasks/" + url.PathEscape(strings.TrimSpace(id))
 }
 
-func (c *Client) doJSON(ctx context.Context, method, path string, query url.Values, body any, result any) error {
+func (c *Client) doJSON(ctx context.Context, method, path string, query url.Values, body any, result any) (returnErr error) {
 	endpoint := *c.baseURL
 	escapedPath := strings.TrimRight(endpoint.EscapedPath(), "/") + path
 	decodedPath, err := url.PathUnescape(escapedPath)
@@ -598,9 +601,11 @@ func (c *Client) doJSON(ctx context.Context, method, path string, query url.Valu
 	endpoint.RawQuery = query.Encode()
 	var payload io.Reader
 	if body != nil {
-		encoded, err := json.Marshal(body)
-		if err != nil {
-			return fmt.Errorf("tasks: encode request: %w", err)
+		var marshalErr error
+		var encoded []byte
+		encoded, marshalErr = json.Marshal(body)
+		if marshalErr != nil {
+			return fmt.Errorf("tasks: encode request: %w", marshalErr)
 		}
 		payload = bytes.NewReader(encoded)
 	}
@@ -621,9 +626,16 @@ func (c *Client) doJSON(ctx context.Context, method, path string, query url.Valu
 	if err != nil {
 		return fmt.Errorf("tasks: request %s %s: %w", method, endpoint.String(), err)
 	}
-	defer response.Body.Close()
+	defer func() {
+		if closeErr := response.Body.Close(); closeErr != nil {
+			returnErr = errors.Join(returnErr, fmt.Errorf("tasks: close response body: %w", closeErr))
+		}
+	}()
 	if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
-		data, _ := io.ReadAll(io.LimitReader(response.Body, 16<<10))
+		data, readErr := io.ReadAll(io.LimitReader(response.Body, 16<<10))
+		if readErr != nil {
+			return fmt.Errorf("tasks: read error response: %w", readErr)
+		}
 		message := strings.TrimSpace(string(data))
 		var apiMessage struct {
 			Error struct {
@@ -638,7 +650,7 @@ func (c *Client) doJSON(ctx context.Context, method, path string, query url.Valu
 	if result == nil || response.StatusCode == http.StatusNoContent {
 		return nil
 	}
-	if err := json.NewDecoder(response.Body).Decode(result); err != nil {
+	if err = json.NewDecoder(response.Body).Decode(result); err != nil {
 		return fmt.Errorf("tasks: decode response: %w", err)
 	}
 	return nil

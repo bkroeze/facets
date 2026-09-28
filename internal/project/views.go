@@ -110,25 +110,25 @@ func (s *Service) UpdateSavedView(ctx context.Context, id string, patch SavedVie
 		return SavedView{}, invalid("saved view patch must contain a change")
 	}
 	if patch.Name != nil {
-		name, err := cleanSavedViewName(*patch.Name)
-		if err != nil {
-			return SavedView{}, err
+		cleanedName, cleanErr := cleanSavedViewName(*patch.Name)
+		if cleanErr != nil {
+			return SavedView{}, cleanErr
 		}
-		patch.Name = &name
+		patch.Name = &cleanedName
 	}
 	if patch.Query != nil {
-		query, err := cleanTaskQuery(*patch.Query)
-		if err != nil {
-			return SavedView{}, err
+		cleanedQuery, cleanErr := cleanTaskQuery(*patch.Query)
+		if cleanErr != nil {
+			return SavedView{}, cleanErr
 		}
-		patch.Query = &query
+		patch.Query = &cleanedQuery
 	}
 	if patch.Order != nil {
-		order, err := cleanTaskOrder(*patch.Order)
-		if err != nil {
-			return SavedView{}, err
+		cleanedOrder, cleanErr := cleanTaskOrder(*patch.Order)
+		if cleanErr != nil {
+			return SavedView{}, cleanErr
 		}
-		patch.Order = &order
+		patch.Order = &cleanedOrder
 	}
 	view, err := s.viewStore.UpdateSavedView(ctx, id, patch)
 	if err != nil {

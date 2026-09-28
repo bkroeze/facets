@@ -290,13 +290,16 @@ omarchy plugin enable facets --section center
 omarchy-restart-shell
 ```
 
-`install-quattro` installs the `facets` binary to `~/.local/bin/facets` and
-copies the plugin manifest, panel, and bar widget to
-`~/.config/omarchy/plugins/facets`. The manifest declares the bar widget's
-default section as `center`; `--section center` makes that placement explicit.
-`omarchy plugin enable facets --section center` records the widget in
-`~/.config/omarchy/shell.json`; Quattro then loads it in the existing shell
-process.
+`install-quattro` installs the `facets` binary into Go's active binary
+destination (`go env GOBIN`, falling back to the first `GOPATH` entry's
+`bin` directory), so Quickshell uses the same toolchain destination as the
+install. It copies the plugin manifest, panel, and bar widget to
+`$XDG_CONFIG_HOME/omarchy/plugins/facets` (falling back to
+`$HOME/.config/omarchy/plugins/facets`). The manifest declares the bar
+widget's default section as `center`; `--section center` makes that
+placement explicit. `omarchy plugin enable facets --section center` records
+the widget in `~/.config/omarchy/shell.json`; Quattro then loads it in the
+existing shell process.
 
 If an older installation has `facets` only in the top-level `plugins` list,
 disable it once before enabling it with the center placement:
@@ -326,9 +329,9 @@ The shell IPC command is required for Quattro; do not add a second
 `quickshell --config` autostart entry.
 
 To update the Quattro plugin, pull the new checkout, rerun
-`go install ./cmd/facets` and `just install-quattro`, then run
-`omarchy-shell shell rescanPlugins` and `omarchy plugin enable facets --section center`
-followed by `omarchy-restart-shell`.
+`just install-quattro`, then run `omarchy-shell shell rescanPlugins` and
+`omarchy plugin enable facets --section center` followed by
+`omarchy-restart-shell`.
 
 To uninstall a checkout-installed plugin:
 

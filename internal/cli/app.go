@@ -39,10 +39,10 @@ type App struct {
 	Getenv                      func(string) string
 	Executable                  string
 	Serve                       func(context.Context, string) error
+	TaskDaemonLockPath          string
 	TaskDaemonInterval          time.Duration
 	TaskDaemonRefreshTimeout    time.Duration
 	TaskDaemonHeartbeatInterval time.Duration
-	TaskDaemonLockPath          string
 }
 
 type runConfig struct {
@@ -778,7 +778,7 @@ func (a *App) runProjects(ctx context.Context, stdout, stderr io.Writer, cfg run
 		if err != nil {
 			return a.providerError(stdout, stderr, cfg.format, "could not list projects", err, fmt.Sprintf("Check provider configuration and retry `%s projects list`", selectedFacetsCommand(cfg)))
 		}
-		if err := a.ProjectStore.SyncProjects(ctx, provider.Name(), items); err != nil {
+		if err = a.ProjectStore.SyncProjects(ctx, provider.Name(), items); err != nil {
 			return a.providerError(stdout, stderr, cfg.format, "could not save project registry", err, fmt.Sprintf("Check the local database and retry `%s projects list`", selectedFacetsCommand(cfg)))
 		}
 		registered, err := a.ProjectStore.SetProjectDisabled(ctx, provider.Name(), args[1], command == "disable")
@@ -1055,7 +1055,7 @@ func (a *App) projectID(ctx context.Context, stdout, stderr io.Writer, cfg runCo
 		return "", 2
 	}
 	if a.debug() {
-		fmt.Fprintf(stderr, "facets debug: project discovery: %v\n", err)
+		_, _ = fmt.Fprintf(stderr, "facets debug: project discovery: %v\n", err)
 	}
 	a.write(stdout, cfg.format, errorDocument("operational", "could not inspect the current workspace", "Pass `--project <id>` to select a project explicitly"))
 	return "", 1
@@ -1063,7 +1063,7 @@ func (a *App) projectID(ctx context.Context, stdout, stderr io.Writer, cfg runCo
 
 func (a *App) providerError(stdout, stderr io.Writer, format, message string, err error, help string) int {
 	if a.debug() {
-		fmt.Fprintf(stderr, "facets debug: %v\n", err)
+		_, _ = fmt.Fprintf(stderr, "facets debug: %v\n", err)
 	}
 	if errors.Is(err, project.ErrNotFound) {
 		message = strings.Replace(message, "could not show", "not found:", 1)
@@ -1121,7 +1121,10 @@ func collapseHome(path string) string {
 
 func shellQuote(value string) string {
 	if value != "" && strings.IndexFunc(value, func(r rune) bool {
-		return !((r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || strings.ContainsRune("_./:@+-", r))
+		return (r < 'a' || r > 'z') &&
+			(r < 'A' || r > 'Z') &&
+			(r < '0' || r > '9') &&
+			!strings.ContainsRune("_./:@+-", r)
 	}) == -1 {
 		return value
 	}
@@ -1346,9 +1349,9 @@ func (v *optionalString) Set(value string) error { v.value = value; v.set = true
 
 type optionalPriority struct {
 	value      *int
+	err        error
 	set        bool
 	allowClear bool
-	err        error
 }
 
 func (v *optionalPriority) String() string {

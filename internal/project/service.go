@@ -108,8 +108,8 @@ func (s *Service) ListTasks(ctx context.Context, projectID string, filter TaskFi
 		return nil, err
 	}
 	if filter.Status != nil {
-		if err := validStatus(*filter.Status); err != nil {
-			return nil, err
+		if statusErr := validStatus(*filter.Status); statusErr != nil {
+			return nil, statusErr
 		}
 	}
 	tasks, err := s.provider.ListTasks(ctx, projectID, filter)

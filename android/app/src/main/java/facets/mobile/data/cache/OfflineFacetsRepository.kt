@@ -60,6 +60,9 @@ class OfflineFacetsRepository(
     override suspend fun apiVersion(): String = remote.apiVersion()
 
     override suspend fun checkHealth(): HealthStatus = remote.checkHealth()
+    override suspend fun getToday() = remote.getToday()
+
+    override suspend fun setTodayFocus(text: String) = remote.setTodayFocus(text)
 
     /** Read methods use the last successful Room snapshot and do not perform network I/O. */
     override suspend fun listProjects(): List<Project> = projects.getAll().map(ProjectEntity::toDomain)

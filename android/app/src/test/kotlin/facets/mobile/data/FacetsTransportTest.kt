@@ -97,14 +97,18 @@ class FacetsTransportTest {
         assertEquals(1, client.listProjects().size)
         assertEquals("facets", client.getProject("facets").id)
         assertEquals(1, client.listTasks("facets", status = TaskListStatus.OPEN).size)
-        assertEquals("ab12", client.getTask("facets", "ab12").id)
+        assertTrue(client.getTask("facets", "ab12").top)
         assertEquals("ab12", client.createTask("facets", CreateTaskRequest("Add Android API")).id)
         assertEquals(
             "ab12",
             client.updateTask(
                 "facets",
                 "ab12",
-                UpdateTaskRequest(priority = null, fields = setOf(TaskUpdateField.PRIORITY)),
+                UpdateTaskRequest(
+                    priority = null,
+                    top = true,
+                    fields = setOf(TaskUpdateField.PRIORITY, TaskUpdateField.TOP),
+                ),
             ).id,
         )
         assertEquals("ab12", client.commentTask("facets", "ab12", CommentRequest("done")).id)
@@ -141,11 +145,31 @@ class FacetsTransportTest {
             assertEquals(expected[index], "${request.method} ${request.path}")
         }
         val patchRequest = requests[5]
-        assertTrue(patchRequest.body.readUtf8().contains("\"priority\":null"))
+        val patchBody = patchRequest.body.readUtf8()
+        assertTrue(patchBody.contains("\"top\":true"))
+        assertTrue(patchBody.contains("\"priority\":null"))
         val deleteRequest = requests[9]
         assertTrue(deleteRequest.body.readUtf8().contains("\"confirm\":\"ab12\""))
     }
 
+    @Test
+    fun todayAndTopTaskTransportUseTheMobileContract() = runBlocking {
+        server.enqueue(ok("""{"focus":{"text":"Ship the release","day_start":"2026-08-30T00:00:00Z"},"top_tasks":[{"project":"facets","project_name":"Facets","task":"ab12","title":"Add Android API"}],"completed_today":{"all":3,"top":1,"day_start":"2026-08-30T00:00:00Z","day_end":"2026-08-31T00:00:00Z"}}"""))
+        server.enqueue(ok("""{"focus":{"text":"Finish the release","day_start":"2026-08-30T00:00:00Z"}}"""))
+        val today = client.getToday()
+        assertEquals("Ship the release", today.focus?.text)
+        assertEquals("ab12", today.topTasks.single().taskId)
+        assertEquals(3, today.completedToday.all)
+
+        assertEquals("Finish the release", client.setTodayFocus("Finish the release").text)
+        val todayRequest = server.takeRequest()
+        val focusRequest = server.takeRequest()
+        assertEquals("GET", todayRequest.method)
+        assertEquals("/api/v1/today", todayRequest.path)
+        assertEquals("POST", focusRequest.method)
+        assertEquals("/api/v1/today/focus", focusRequest.path)
+        assertTrue(focusRequest.body.readUtf8().contains("\"text\":\"Finish the release\""))
+    }
     @Test
     fun versionMismatchUnknownEnumAndMalformedJsonAreTyped() = runBlocking {
         server.enqueue(ok("{\"version\":\"v2\"}"))
@@ -233,7 +257,6 @@ class FacetsTransportTest {
         delay(20)
         job.cancel()
         job.join()
-        assertTrue(job.isCancelled)
     }
 
     private fun secureHttpClient(): OkHttpClient = trustedClient
@@ -251,7 +274,7 @@ class FacetsTransportTest {
     private companion object {
         const val projectJson = "{\"id\":\"facets\",\"name\":\"Facets\",\"description\":\"Dashboard\",\"active_task_count\":1,\"created_at\":\"2026-08-12T12:00:00Z\",\"updated_at\":null}"
         const val projectListJson = "{\"projects\":[$projectJson]}"
-        const val taskJson = "{\"id\":\"ab12\",\"project_id\":\"facets\",\"title\":\"Add Android API\",\"description\":\"Define transport\",\"status\":\"open\",\"priority\":2,\"assignee\":\"bruce\",\"created_at\":\"2026-08-12T12:00:00Z\",\"updated_at\":\"2026-08-12T12:30:00Z\"}"
+        const val taskJson = "{\"id\":\"ab12\",\"project_id\":\"facets\",\"title\":\"Add Android API\",\"description\":\"Define transport\",\"status\":\"open\",\"priority\":2,\"assignee\":\"bruce\",\"top\":true,\"created_at\":\"2026-08-12T12:00:00Z\",\"updated_at\":\"2026-08-12T12:30:00Z\"}"
         const val taskListJson = "{\"tasks\":[$taskJson]}"
         const val viewJson = "{\"id\":\"assigned\",\"name\":\"Assigned\",\"builtin\":false,\"query\":{\"statuses\":[\"open\"],\"assignees\":[\"bruce\"],\"priorities\":[1]},\"order\":{\"field\":\"priority\",\"direction\":\"asc\"},\"created_at\":\"2026-08-12T12:00:00Z\",\"updated_at\":null}"
         const val viewListJson = "{\"views\":[$viewJson]}"

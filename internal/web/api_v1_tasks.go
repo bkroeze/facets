@@ -6,14 +6,15 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 
 	"facets.barnlab.dev/internal/project"
 )
 
 type apiV1IdempotentTask struct {
-	Fingerprint string
 	Task        project.Task
+	Fingerprint string
 }
 
 func (s *server) apiV1Tasks(w http.ResponseWriter, r *http.Request) {
@@ -101,9 +102,9 @@ func (s *server) createAPITask(r *http.Request, projectID string, input project.
 		return validateAPITask(projectID, task.ID, task)
 	}
 	fpb, err := json.Marshal(struct {
-		ProjectID, Title, Description, Assignee string
 		Priority                                *int
-	}{projectID, strings.TrimSpace(input.Title), input.Description, strings.TrimSpace(input.Assignee), input.Priority})
+		ProjectID, Title, Description, Assignee string
+	}{input.Priority, projectID, strings.TrimSpace(input.Title), input.Description, strings.TrimSpace(input.Assignee)})
 	if err != nil {
 		return project.Task{}, err
 	}
@@ -128,7 +129,7 @@ func (s *server) createAPITask(r *http.Request, projectID string, input project.
 	if s.taskCreates == nil {
 		s.taskCreates = make(map[string]apiV1IdempotentTask)
 	}
-	s.taskCreates[mapKey] = apiV1IdempotentTask{fp, task}
+	s.taskCreates[mapKey] = apiV1IdempotentTask{Task: task, Fingerprint: fp}
 	return task, nil
 }
 
@@ -272,6 +273,12 @@ func (req apiV1UpdateTaskRequest) taskPatch() (project.TaskPatch, error) {
 			return p, project.ErrInvalid
 		}
 		p.Assignee = &req.Assignee.Value
+	}
+	if req.Top.Set {
+		if req.Top.Null {
+			return p, project.ErrInvalid
+		}
+		p.Metadata = map[string]any{"facets.top": strconv.FormatBool(req.Top.Value)}
 	}
 	return p, nil
 }

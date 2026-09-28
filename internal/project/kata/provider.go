@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"os"
 	"os/exec"
 	"sort"
 	"strconv"
@@ -35,16 +34,16 @@ func (f RunnerFunc) Run(ctx context.Context, binary string, args ...string) ([]b
 
 // Config configures a Kata provider.
 type Config struct {
+	Runner Runner
 	Binary string
 	Actor  string
-	Runner Runner
 }
 
 // Provider manages projects and tasks through Kata.
 type Provider struct {
+	runner Runner
 	binary string
 	actor  string
-	runner Runner
 }
 
 var _ project.Provider = (*Provider)(nil)
@@ -192,8 +191,8 @@ func (p *Provider) CreateTask(ctx context.Context, projectID string, input proje
 		return project.Task{}, err
 	}
 	if input.Priority != nil {
-		if err := validatePriority(*input.Priority); err != nil {
-			return project.Task{}, err
+		if priorityErr := validatePriority(*input.Priority); priorityErr != nil {
+			return project.Task{}, priorityErr
 		}
 	}
 	args := []string{"create", title, "--project", projectID}
@@ -239,8 +238,8 @@ func (p *Provider) UpdateTask(ctx context.Context, projectID, id string, patch p
 
 	var statusArgs []string
 	if patch.Status != nil {
-		if err := validateStatus(*patch.Status); err != nil {
-			return project.Task{}, err
+		if statusErr := validateStatus(*patch.Status); statusErr != nil {
+			return project.Task{}, statusErr
 		}
 		switch *patch.Status {
 		case project.StatusOpen:
@@ -249,9 +248,9 @@ func (p *Provider) UpdateTask(ctx context.Context, projectID, id string, patch p
 			if patch.Completion == nil {
 				return project.Task{}, errors.New("kata: closing a task requires completion")
 			}
-			message, err := required("completion message", patch.Completion.Message)
-			if err != nil {
-				return project.Task{}, err
+			message, messageErr := required("completion message", patch.Completion.Message)
+			if messageErr != nil {
+				return project.Task{}, messageErr
 			}
 			if len(patch.Completion.Evidence) == 0 {
 				return project.Task{}, errors.New("kata: closing a task requires evidence")
@@ -265,9 +264,9 @@ func (p *Provider) UpdateTask(ctx context.Context, projectID, id string, patch p
 				statusArgs = append(statusArgs, "--evidence", evidence)
 			}
 			if patch.Completion.Comment != "" {
-				comment, err := required("completion comment", patch.Completion.Comment)
-				if err != nil {
-					return project.Task{}, err
+				comment, commentErr := required("completion comment", patch.Completion.Comment)
+				if commentErr != nil {
+					return project.Task{}, commentErr
 				}
 				statusArgs = append(statusArgs, "--comment", comment)
 			}
@@ -277,9 +276,9 @@ func (p *Provider) UpdateTask(ctx context.Context, projectID, id string, patch p
 	editArgs := []string{"edit", id, "--project", projectID}
 	hasEdit := false
 	if patch.Title != nil {
-		title, err := required("task title", *patch.Title)
-		if err != nil {
-			return project.Task{}, err
+		title, titleErr := required("task title", *patch.Title)
+		if titleErr != nil {
+			return project.Task{}, titleErr
 		}
 		editArgs = append(editArgs, "--title", title)
 		hasEdit = true
@@ -291,8 +290,8 @@ func (p *Provider) UpdateTask(ctx context.Context, projectID, id string, patch p
 	if patch.Priority.Set {
 		priority := "-"
 		if patch.Priority.Value != nil {
-			if err := validatePriority(*patch.Priority.Value); err != nil {
-				return project.Task{}, err
+			if priorityErr := validatePriority(*patch.Priority.Value); priorityErr != nil {
+				return project.Task{}, priorityErr
 			}
 			priority = strconv.Itoa(*patch.Priority.Value)
 		}
@@ -311,14 +310,14 @@ func (p *Provider) UpdateTask(ctx context.Context, projectID, id string, patch p
 	var response issueResponse
 	hasResponse := false
 	if hasEdit {
-		if err := p.runJSON(ctx, editArgs, &response); err != nil {
-			return project.Task{}, err
+		if runErr := p.runJSON(ctx, editArgs, &response); runErr != nil {
+			return project.Task{}, runErr
 		}
 		hasResponse = true
 	}
 	if patch.Status != nil {
-		if err := p.runJSON(ctx, statusArgs, &response); err != nil {
-			return project.Task{}, err
+		if runErr := p.runJSON(ctx, statusArgs, &response); runErr != nil {
+			return project.Task{}, runErr
 		}
 		hasResponse = true
 	}
@@ -348,9 +347,9 @@ func (p *Provider) updateTaskMetadata(ctx context.Context, projectID, id string,
 		if value == nil {
 			args = []string{"meta", "unset", id, key}
 		} else {
-			encoded, jsonValue, err := encodeMetadataValue(value)
-			if err != nil {
-				return issueResponse{}, fmt.Errorf("kata: encode task metadata %q: %w", key, err)
+			encoded, jsonValue, encodeErr := encodeMetadataValue(value)
+			if encodeErr != nil {
+				return issueResponse{}, fmt.Errorf("kata: encode task metadata %q: %w", key, encodeErr)
 			}
 			args = append(args, encoded)
 			if jsonValue {
@@ -434,15 +433,15 @@ func (p *Provider) runJSON(ctx context.Context, args []string, response any) err
 		return result
 	}
 	var envelope apiEnvelope
-	if err := json.Unmarshal(stdout, &envelope); err != nil {
-		return fmt.Errorf("kata: decode %s response: %w", commandText(p.binary, args), err)
+	if decodeErr := json.Unmarshal(stdout, &envelope); decodeErr != nil {
+		return fmt.Errorf("kata: decode %s response: %w", commandText(p.binary, args), decodeErr)
 	}
 	if envelope.Version != apiVersion {
 		return fmt.Errorf("kata: %s returned unsupported kata_api_version %d", commandText(p.binary, args), envelope.Version)
 	}
 	if response != nil {
-		if err := json.Unmarshal(stdout, response); err != nil {
-			return fmt.Errorf("kata: decode %s response: %w", commandText(p.binary, args), err)
+		if decodeErr := json.Unmarshal(stdout, response); decodeErr != nil {
+			return fmt.Errorf("kata: decode %s response: %w", commandText(p.binary, args), decodeErr)
 		}
 	}
 	return nil
@@ -451,11 +450,11 @@ func (p *Provider) runJSON(ctx context.Context, args []string, response any) err
 // CommandError reports a failed Kata subprocess while retaining its original
 // error and captured output for diagnostics.
 type CommandError struct {
+	Err    error
 	Binary string
-	Args   []string
 	Stdout string
 	Stderr string
-	Err    error
+	Args   []string
 }
 
 func (e *CommandError) Error() string {
@@ -477,11 +476,11 @@ func (execRunner) Run(ctx context.Context, binary string, args ...string) ([]byt
 	command := exec.CommandContext(ctx, binary, args...)
 	command.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	command.Cancel = func() error {
-		err := syscall.Kill(-command.Process.Pid, syscall.SIGKILL)
-		if errors.Is(err, syscall.ESRCH) {
-			return os.ErrProcessDone
+		cancelErr := syscall.Kill(-command.Process.Pid, syscall.SIGKILL)
+		if errors.Is(cancelErr, syscall.ESRCH) {
+			return nil
 		}
-		return err
+		return cancelErr
 	}
 	command.WaitDelay = time.Second
 	var stdout bytes.Buffer
@@ -503,34 +502,34 @@ type commandErrorEnvelope struct {
 }
 
 type projectsResponse struct {
-	Version  int          `json:"kata_api_version"`
 	Projects []rawProject `json:"projects"`
+	Version  int          `json:"kata_api_version"`
 }
 
 type projectResponse struct {
-	Version int         `json:"kata_api_version"`
 	Project *rawProject `json:"project"`
 	Aliases []rawAlias  `json:"aliases"`
+	Version int         `json:"kata_api_version"`
 }
 
 type issuesResponse struct {
-	Version int        `json:"kata_api_version"`
 	Issues  []rawIssue `json:"issues"`
+	Version int        `json:"kata_api_version"`
 }
 
 type issueResponse struct {
-	Version int      `json:"kata_api_version"`
 	Issue   rawIssue `json:"issue"`
+	Version int      `json:"kata_api_version"`
 }
 
 type rawProject struct {
-	ID        int64          `json:"id"`
+	Metadata  map[string]any `json:"metadata"`
 	UID       string         `json:"uid"`
 	Name      string         `json:"name"`
-	Metadata  map[string]any `json:"metadata"`
-	Revision  int            `json:"revision"`
 	CreatedAt string         `json:"created_at"`
 	UpdatedAt string         `json:"updated_at"`
+	ID        int64          `json:"id"`
+	Revision  int            `json:"revision"`
 }
 
 type rawAlias struct {
@@ -538,9 +537,9 @@ type rawAlias struct {
 }
 
 type rawIssue struct {
-	ID          int64          `json:"id"`
+	Metadata    map[string]any `json:"metadata"`
+	Priority    *int           `json:"priority"`
 	UID         string         `json:"uid"`
-	ProjectID   int64          `json:"project_id"`
 	ProjectUID  string         `json:"project_uid"`
 	ShortID     string         `json:"short_id"`
 	QualifiedID string         `json:"qualified_id"`
@@ -548,12 +547,12 @@ type rawIssue struct {
 	Body        string         `json:"body"`
 	Status      string         `json:"status"`
 	Owner       string         `json:"owner"`
-	Priority    *int           `json:"priority"`
 	Author      string         `json:"author"`
-	Metadata    map[string]any `json:"metadata"`
-	Revision    int            `json:"revision"`
 	CreatedAt   string         `json:"created_at"`
 	UpdatedAt   string         `json:"updated_at"`
+	ID          int64          `json:"id"`
+	ProjectID   int64          `json:"project_id"`
+	Revision    int            `json:"revision"`
 }
 
 func mapProjectResponse(response projectResponse) (project.Project, error) {
@@ -598,8 +597,8 @@ func mapProject(source rawProject, aliases []rawAlias) (project.Project, error) 
 
 func mapIssue(source rawIssue, projectID string) (project.Task, error) {
 	status := project.Status(source.Status)
-	if err := validateStatus(status); err != nil {
-		return project.Task{}, fmt.Errorf("task %q: %w", source.ShortID, err)
+	if statusErr := validateStatus(status); statusErr != nil {
+		return project.Task{}, fmt.Errorf("task %q: %w", source.ShortID, statusErr)
 	}
 	createdAt, err := parseTime("task created_at", source.CreatedAt)
 	if err != nil {

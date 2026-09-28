@@ -19,11 +19,11 @@ import (
 
 type mutableDaemonProvider struct {
 	*fakeProvider
-	mu          sync.Mutex
-	projectList []project.Project
-	tasks       map[string][]project.Task
 	err         error
+	tasks       map[string][]project.Task
+	projectList []project.Project
 	filters     []project.TaskFilter
+	mu          sync.Mutex
 }
 
 func newMutableDaemonProvider(projects []project.Project, tasks map[string][]project.Task) *mutableDaemonProvider {
@@ -177,8 +177,8 @@ func startTaskDaemonAtRuntime(t *testing.T, provider project.Provider, registry 
 func scanDaemonEvent(t *testing.T, scanner *bufio.Scanner) []byte {
 	t.Helper()
 	type result struct {
-		line []byte
 		err  error
+		line []byte
 	}
 	resultCh := make(chan result, 1)
 	go func() {

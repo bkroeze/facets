@@ -27,33 +27,33 @@ const (
 
 // Project identifies a project managed by a provider.
 type Project struct {
-	ID          string
-	Name        string
-	Description string
 	Metadata    map[string]any
 	CreatedAt   time.Time
 	UpdatedAt   time.Time
+	ID          string
+	Name        string
+	Description string
 }
 
 // Task is work tracked inside a project.
 type Task struct {
+	Metadata    map[string]any
+	Priority    *int
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
 	ID          string
 	ProjectID   string
 	Title       string
 	Description string
 	Status      Status
-	Priority    *int
 	Assignee    string
-	Metadata    map[string]any
-	CreatedAt   time.Time
-	UpdatedAt   time.Time
 }
 
 // ProjectInput contains fields used to create a project.
 type ProjectInput struct {
+	Metadata    map[string]any
 	Name        string
 	Description string
-	Metadata    map[string]any
 }
 
 // ProjectPatch contains project fields to replace when non-nil.
@@ -96,20 +96,20 @@ const (
 
 // SavedView is a named provider-neutral task query.
 type SavedView struct {
-	ID        string
-	Name      string
-	Builtin   bool
-	Query     TaskQuery
 	Order     TaskOrder
 	CreatedAt time.Time
 	UpdatedAt time.Time
+	ID        string
+	Name      string
+	Query     TaskQuery
+	Builtin   bool
 }
 
 // SavedViewInput contains fields used to create a saved view.
 type SavedViewInput struct {
+	Order TaskOrder
 	Name  string
 	Query TaskQuery
-	Order TaskOrder
 }
 
 // SavedViewPatch contains saved-view fields to replace when non-nil.
@@ -131,38 +131,36 @@ type SavedViewStore interface {
 
 // TaskInput contains fields used to create a task.
 type TaskInput struct {
+	Metadata       map[string]any
+	Priority       *int
 	Title          string
 	Description    string
-	Priority       *int
 	Assignee       string
 	IdempotencyKey string
-	Metadata       map[string]any
 }
 
 // Completion supplies the audit context needed to close a task. Comment, when
 // non-empty, appends provider-native commentary as part of the close mutation.
 type Completion struct {
 	Message  string
-	Evidence []string
 	Comment  string
+	Evidence []string
 }
 
-// PriorityPatch distinguishes an unchanged priority from setting or clearing it.
-// Set false leaves the priority unchanged. Set true with a nil Value clears it.
 type PriorityPatch struct {
-	Set   bool
 	Value *int
+	Set   bool
 }
 
 // TaskPatch contains optional task field changes.
 type TaskPatch struct {
 	Title       *string
 	Description *string
-	Priority    PriorityPatch
 	Assignee    *string
 	Status      *Status
 	Completion  *Completion
 	Metadata    map[string]any
+	Priority    PriorityPatch
 }
 
 // Provider supplies project and task CRUD plus task comments for one external system.

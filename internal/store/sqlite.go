@@ -26,22 +26,22 @@ type Store struct {
 
 // Project is a manually registered project.
 type Project struct {
-	ID        int64
-	Name      string
-	Slug      string
 	CreatedAt time.Time
 	UpdatedAt time.Time
+	Name      string
+	Slug      string
+	ID        int64
 }
 
 // RegisteredProject is a provider project tracked by the local registry.
 type RegisteredProject struct {
+	FirstSeen  time.Time
+	LastSeen   time.Time
+	Metadata   map[string]any
+	DisabledAt *time.Time
 	Source     string
 	ID         string
 	Name       string
-	Metadata   map[string]any
-	FirstSeen  time.Time
-	LastSeen   time.Time
-	DisabledAt *time.Time
 }
 
 // Directory returns normalized directory metadata when it is a non-empty string.
@@ -53,10 +53,10 @@ func (p RegisteredProject) Directory() (string, bool) {
 
 // DayFocus is a focus entry assigned to a user's local calendar day.
 type DayFocus struct {
-	ID        int64
-	Focus     string
 	DayStart  time.Time
 	CreatedAt time.Time
+	Focus     string
+	ID        int64
 }
 
 // ProjectInput contains the mutable fields of a project.
@@ -98,7 +98,9 @@ func Open(ctx context.Context, path string) (*Store, error) {
 	db.SetMaxIdleConns(1)
 
 	closeOnError := func(err error) (*Store, error) {
-		_ = db.Close()
+		if closeErr := db.Close(); closeErr != nil {
+			return nil, fmt.Errorf("%w (also closing database: %v)", err, closeErr)
+		}
 		return nil, err
 	}
 
@@ -263,7 +265,7 @@ func (s *Store) ProjectBySlug(ctx context.Context, slug string) (Project, error)
 }
 
 // ListProjects returns every project in stable display order.
-func (s *Store) ListProjects(ctx context.Context) ([]Project, error) {
+func (s *Store) ListProjects(ctx context.Context) (projects []Project, err error) {
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT id, name, slug, created_at, updated_at
 		FROM projects
@@ -272,9 +274,14 @@ func (s *Store) ListProjects(ctx context.Context) ([]Project, error) {
 	if err != nil {
 		return nil, fmt.Errorf("store: list projects: %w", err)
 	}
-	defer rows.Close()
+	defer func() {
+		if closeErr := rows.Close(); closeErr != nil && err == nil {
+			err = fmt.Errorf("store: list projects: close rows: %w", closeErr)
+		}
+	}()
 
-	projects := make([]Project, 0)
+	projects = make([]Project, 0)
+
 	for rows.Next() {
 		project, err := scanProject(rows)
 		if err != nil {
@@ -365,7 +372,7 @@ func (s *Store) SyncProjects(ctx context.Context, source string, items []project
 }
 
 // RegisteredProjects returns every provider project for source in stable ID order.
-func (s *Store) RegisteredProjects(ctx context.Context, source string) ([]RegisteredProject, error) {
+func (s *Store) RegisteredProjects(ctx context.Context, source string) (projects []RegisteredProject, err error) {
 	source = strings.TrimSpace(source)
 	if source == "" {
 		return nil, errors.New("store: project source is required")
@@ -379,9 +386,14 @@ func (s *Store) RegisteredProjects(ctx context.Context, source string) ([]Regist
 	if err != nil {
 		return nil, fmt.Errorf("store: list registered projects: %w", err)
 	}
-	defer rows.Close()
+	defer func() {
+		if closeErr := rows.Close(); closeErr != nil && err == nil {
+			err = fmt.Errorf("store: list registered projects: close rows: %w", closeErr)
+		}
+	}()
 
-	projects := make([]RegisteredProject, 0)
+	projects = make([]RegisteredProject, 0)
+
 	for rows.Next() {
 		registered, err := scanRegisteredProject(rows)
 		if err != nil {
@@ -511,7 +523,7 @@ func (s *Store) CurrentDayFocus(ctx context.Context, now time.Time) (DayFocus, e
 }
 
 // ListSavedViews returns persisted user-defined views. Built-in views are not stored.
-func (s *Store) ListSavedViews(ctx context.Context) ([]project.SavedView, error) {
+func (s *Store) ListSavedViews(ctx context.Context) (views []project.SavedView, err error) {
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT id, name, query_json, order_json, created_at, updated_at
 		FROM saved_views
@@ -520,8 +532,12 @@ func (s *Store) ListSavedViews(ctx context.Context) ([]project.SavedView, error)
 	if err != nil {
 		return nil, fmt.Errorf("store: list saved views: %w", err)
 	}
-	defer rows.Close()
-	views := make([]project.SavedView, 0)
+	defer func() {
+		if closeErr := rows.Close(); closeErr != nil && err == nil {
+			err = fmt.Errorf("store: list saved views: close rows: %w", closeErr)
+		}
+	}()
+	views = make([]project.SavedView, 0)
 	for rows.Next() {
 		view, err := scanSavedView(rows)
 		if err != nil {

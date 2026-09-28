@@ -95,7 +95,7 @@ func (a *App) runTaskDaemon(ctx context.Context, stdout, stderr io.Writer, cfg r
 		return 2
 	}
 	if a.ProjectStore == nil {
-		fmt.Fprintln(stderr, "facets tasks daemon: project registry is unavailable")
+		_, _ = fmt.Fprintln(stderr, "facets tasks daemon: project registry is unavailable")
 		return 1
 	}
 
@@ -105,10 +105,10 @@ func (a *App) runTaskDaemon(ctx context.Context, stdout, stderr io.Writer, cfg r
 	}
 	lock, err := a.acquireTaskDaemonLock()
 	if err != nil {
-		fmt.Fprintf(stderr, "facets tasks daemon: %v\n", err)
+		_, _ = fmt.Fprintf(stderr, "facets tasks daemon: %v\n", err)
 		return 1
 	}
-	defer lock.Close()
+	defer func() { _ = lock.Close() }()
 
 	heartbeat := time.NewTicker(heartbeatInterval)
 	defer heartbeat.Stop()
@@ -162,18 +162,18 @@ func (a *App) runTaskDaemon(ctx context.Context, stdout, stderr io.Writer, cfg r
 			if errors.Is(refreshErr, context.Canceled) || errors.Is(ctx.Err(), context.Canceled) {
 				return 0
 			}
-			fmt.Fprintf(stderr, "facets tasks daemon: refresh failed: %v\n", refreshErr)
+			_, _ = fmt.Fprintf(stderr, "facets tasks daemon: refresh failed: %v\n", refreshErr)
 			event = taskDaemonError{Type: "error", Message: refreshErr.Error(), Retrying: true}
 		}
 
 		encoded, marshalErr := encodeTaskDaemonEvent(event, eventFormat)
 		if marshalErr != nil {
-			fmt.Fprintf(stderr, "facets tasks daemon: encode event: %v\n", marshalErr)
+			_, _ = fmt.Fprintf(stderr, "facets tasks daemon: encode event: %v\n", marshalErr)
 			return 1
 		}
 		if !bytes.Equal(encoded, lastEvent) {
 			if _, writeErr := stdout.Write(encoded); writeErr != nil {
-				fmt.Fprintf(stderr, "facets tasks daemon: write event: %v\n", writeErr)
+				_, _ = fmt.Fprintf(stderr, "facets tasks daemon: write event: %v\n", writeErr)
 				return 1
 			}
 			lastEvent = append(lastEvent[:0], encoded...)

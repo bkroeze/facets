@@ -11,7 +11,7 @@ enum class TopLevelDestination(
     val route: String,
     val label: String,
 ) {
-    HOME("home", "Home"),
+    HOME("home", "Today"),
     TASKS("tasks", "Tasks"),
     PROJECTS("projects", "Projects"),
     SETTINGS("settings", "Settings"),

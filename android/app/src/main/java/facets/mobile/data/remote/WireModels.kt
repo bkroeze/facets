@@ -65,6 +65,7 @@ data class TaskDto(
     val status: TaskStatusDto,
     val priority: Int?,
     val assignee: String,
+    val top: Boolean = false,
     @SerialName("created_at") val createdAt: String,
     @SerialName("updated_at") val updatedAt: String,
 )
@@ -87,6 +88,7 @@ data class TaskPatchDto(
     val description: String? = null,
     val priority: Int? = null,
     val assignee: String? = null,
+    val top: Boolean? = null,
     @kotlinx.serialization.Transient val presentFields: Set<String> = emptySet(),
 )
 
@@ -96,6 +98,7 @@ object TaskPatchDtoSerializer : KSerializer<TaskPatchDto> {
         element<String?>("description", isOptional = true)
         element<Int?>("priority", isOptional = true)
         element<String?>("assignee", isOptional = true)
+        element<Boolean>("top", isOptional = true)
     }
 
     override fun serialize(encoder: Encoder, value: TaskPatchDto) {
@@ -107,6 +110,10 @@ object TaskPatchDtoSerializer : KSerializer<TaskPatchDto> {
             if ("description" in fields || value.description != null) putNullable("description", value.description)
             if ("priority" in fields || value.priority != null) putNullable("priority", value.priority)
             if ("assignee" in fields || value.assignee != null) putNullable("assignee", value.assignee)
+            if ("top" in fields || value.top != null) {
+                val top = value.top ?: throw SerializationException("top cannot be null")
+                put("top", top)
+            }
         })
     }
 
@@ -116,11 +123,13 @@ object TaskPatchDtoSerializer : KSerializer<TaskPatchDto> {
         val objectValue = jsonDecoder.decodeJsonElement().jsonObject
         fun string(name: String): String? = objectValue[name]?.takeUnless { it is JsonNull }?.jsonPrimitive?.content
         fun integer(name: String): Int? = objectValue[name]?.takeUnless { it is JsonNull }?.jsonPrimitive?.int
+        fun boolean(name: String): Boolean? = objectValue[name]?.takeUnless { it is JsonNull }?.jsonPrimitive?.content?.toBooleanStrictOrNull()
         return TaskPatchDto(
             title = string("title"),
             description = string("description"),
             priority = integer("priority"),
             assignee = string("assignee"),
+            top = boolean("top"),
             presentFields = objectValue.keys,
         )
     }
@@ -128,6 +137,39 @@ object TaskPatchDtoSerializer : KSerializer<TaskPatchDto> {
 
 @Serializable
 data class CommentDto(val body: String)
+@Serializable
+data class TodayFocusDto(
+    val text: String,
+    @SerialName("day_start") val dayStart: String,
+)
+
+@Serializable
+data class TodayTaskDto(
+    val project: String,
+    @SerialName("project_name") val projectName: String,
+    val task: String,
+    val title: String,
+)
+
+@Serializable
+data class TodayCompletedDto(
+    val all: Int,
+    val top: Int,
+    @SerialName("day_start") val dayStart: String,
+    @SerialName("day_end") val dayEnd: String,
+)
+
+@Serializable
+data class TodayDto(
+    val focus: TodayFocusDto?,
+    @SerialName("top_tasks") val topTasks: List<TodayTaskDto>,
+    @SerialName("completed_today") val completedToday: TodayCompletedDto,
+)
+
+@Serializable
+data class SetTodayFocusDto(val text: String)
+@Serializable
+data class TodayFocusResponseDto(val focus: TodayFocusDto)
 
 @Serializable
 data class CloseTaskDto(

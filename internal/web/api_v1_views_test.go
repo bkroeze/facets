@@ -95,8 +95,8 @@ func TestAPIV1SavedViewValidationAndBuiltInProtection(t *testing.T) {
 		method string
 		path   string
 		body   string
-		status int
 		code   string
+		status int
 	}{
 		{method: http.MethodPost, path: apiV1Prefix + "/views", body: `{"name":"active","query":{},"order":{}}`, status: http.StatusConflict, code: "conflict"},
 		{method: http.MethodPost, path: apiV1Prefix + "/views", body: `{"name":"Bad","query":{"priorities":[9]},"order":{}}`, status: http.StatusUnprocessableEntity, code: "validation_failed"},
@@ -138,7 +138,12 @@ func newSavedViewTestHandler(t *testing.T, provider *savedViewProviderStub) http
 	if err != nil {
 		t.Fatalf("store.Open() error = %v", err)
 	}
-	t.Cleanup(func() { _ = registry.Close() })
+	t.Cleanup(func() {
+		closeErr := registry.Close()
+		if closeErr != nil {
+			t.Errorf("registry.Close() error = %v", closeErr)
+		}
+	})
 	handler, err := NewWithRegistry(slog.New(slog.NewTextHandler(io.Discard, nil)), provider, registry, provider)
 	if err != nil {
 		t.Fatalf("NewWithRegistry() error = %v", err)

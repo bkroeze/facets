@@ -14,8 +14,8 @@ class MainActivityTest {
     val composeRule = createAndroidComposeRule<MainActivity>()
 
     @Test
-    fun launchesHomeAndRestoresSelectedDestinationAfterRecreation() {
-        composeRule.onNodeWithText("Your dashboard at a glance").fetchSemanticsNode()
+    fun launchesTodayAndRestoresSelectedDestinationAfterRecreation() {
+        composeRule.onNodeWithText("Connect a server in Settings to see today's focus and top tasks.").fetchSemanticsNode()
         composeRule.onNodeWithText("Tasks").performClick()
         composeRule.onNodeWithText("Tasks will appear here").fetchSemanticsNode()
 

@@ -10,7 +10,7 @@ import androidx.room.withTransaction
 
 @Database(
     entities = [ProjectEntity::class, TaskEntity::class, SavedViewEntity::class, SyncStateEntity::class],
-    version = 3,
+    version = 4,
 )
 abstract class FacetsDatabase : RoomDatabase() {
     abstract fun projects(): ProjectDao
@@ -63,10 +63,16 @@ abstract class FacetsDatabase : RoomDatabase() {
             }
         }
 
+        val MIGRATION_3_4: Migration = object : Migration(3, 4) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE tasks ADD COLUMN top INTEGER NOT NULL DEFAULT 0")
+            }
+        }
+
         fun create(context: Context): FacetsDatabase = Room.databaseBuilder(
             context.applicationContext,
             FacetsDatabase::class.java,
             "facets-cache.db",
-        ).addMigrations(MIGRATION_1_2, MIGRATION_2_3).build()
+        ).addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4).build()
     }
 }

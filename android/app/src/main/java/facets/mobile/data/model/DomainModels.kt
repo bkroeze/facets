@@ -26,6 +26,7 @@ data class Task(
     val assignee: String,
     val createdAt: Instant,
     val updatedAt: Instant,
+    val top: Boolean = false,
 )
 
 data class ViewQuery(
@@ -60,13 +61,14 @@ data class CreateTaskRequest(
     val idempotencyKey: String? = null,
 )
 
-enum class TaskUpdateField { TITLE, DESCRIPTION, PRIORITY, ASSIGNEE }
+enum class TaskUpdateField { TITLE, DESCRIPTION, PRIORITY, ASSIGNEE, TOP }
 
 data class UpdateTaskRequest(
     val title: String? = null,
     val description: String? = null,
     val priority: Int? = null,
     val assignee: String? = null,
+    val top: Boolean? = null,
     /** Include a field here when its value is intentionally null (for example, to clear priority). */
     val fields: Set<TaskUpdateField> = emptySet(),
 ) {
@@ -75,6 +77,7 @@ data class UpdateTaskRequest(
         if (description != null || TaskUpdateField.DESCRIPTION in fields) add("description")
         if (priority != null || TaskUpdateField.PRIORITY in fields) add("priority")
         if (assignee != null || TaskUpdateField.ASSIGNEE in fields) add("assignee")
+        if (top != null || TaskUpdateField.TOP in fields) add("top")
     }
 }
 
@@ -108,3 +111,27 @@ data class UpdateViewRequest(
 }
 
 data class HealthStatus(val healthy: Boolean)
+data class TodayFocus(
+    val text: String,
+    val dayStart: Instant,
+)
+
+data class TodayTask(
+    val projectId: String,
+    val projectName: String,
+    val taskId: String,
+    val title: String,
+)
+
+data class TodayCompletion(
+    val all: Int,
+    val top: Int,
+    val dayStart: Instant,
+    val dayEnd: Instant,
+)
+
+data class TodaySnapshot(
+    val focus: TodayFocus?,
+    val topTasks: List<TodayTask>,
+    val completedToday: TodayCompletion,
+)

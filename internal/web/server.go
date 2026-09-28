@@ -92,7 +92,7 @@ func newWithRegistry(logger *slog.Logger, projects ProjectSource, registry *stor
 
 	s := &server{
 		logger: logger, projects: projects, provider: provider, service: service, registry: registry,
-		summarizer: status.NewBuilder(), templates: templates,
+		summarizer: status.NewBuilder(), templates: templates, clock: time.Now,
 	}
 	mux := http.NewServeMux()
 	mux.Handle("GET /assets/", http.StripPrefix("/assets/", http.FileServer(http.FS(assets))))
@@ -106,6 +106,8 @@ func newWithRegistry(logger *slog.Logger, projects ProjectSource, registry *stor
 	mux.HandleFunc(apiV1Prefix+"/projects/{project_id}/tasks/{task_id}/comments", s.apiV1CommentTask)
 	mux.HandleFunc(apiV1Prefix+"/projects/{project_id}/tasks/{task_id}/close", s.apiV1CloseTask)
 	mux.HandleFunc(apiV1Prefix+"/projects/{project_id}/tasks/{task_id}/reopen", s.apiV1ReopenTask)
+	mux.HandleFunc(apiV1Prefix+"/today", s.apiV1Today)
+	mux.HandleFunc(apiV1Prefix+"/today/focus", s.apiV1TodayFocus)
 	mux.HandleFunc(apiV1Prefix+"/views", s.apiV1Views)
 	mux.HandleFunc(apiV1Prefix+"/views/{view_id}", s.apiV1View)
 	mux.HandleFunc(apiV1Prefix+"/projects/{project_id}/views/{view_id}/tasks", s.apiV1ExecuteView)
@@ -123,18 +125,19 @@ type server struct {
 	registry     *store.Store
 	summarizer   *status.Builder
 	templates    *template.Template
+	clock        func() time.Time
+	taskCreates  map[string]apiV1IdempotentTask
 	requests     atomic.Uint64
 	taskCreateMu sync.Mutex
-	taskCreates  map[string]apiV1IdempotentTask
 }
 type projectView struct {
-	project.Project
 	Summary *status.Summary
+	project.Project
 }
 
 type pageData struct {
-	Year     int
 	Projects []projectView
+	Year     int
 }
 
 type statusData struct {
@@ -142,9 +145,9 @@ type statusData struct {
 }
 
 type errorData struct {
-	Status  int
 	Title   string
 	Message string
+	Status  int
 }
 
 func (s *server) index(w http.ResponseWriter, r *http.Request) {
@@ -154,8 +157,8 @@ func (s *server) index(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if s.registry != nil && s.provider != nil {
-		if err := s.registry.SyncProjects(r.Context(), s.provider.Name(), projects); err != nil {
-			s.respondError(w, r, http.StatusBadGateway, "Project registry unavailable", "Facets could not update the local project registry. Try again shortly.", err)
+		if syncErr := s.registry.SyncProjects(r.Context(), s.provider.Name(), projects); syncErr != nil {
+			s.respondError(w, r, http.StatusBadGateway, "Project registry unavailable", "Facets could not update the local project registry. Try again shortly.", syncErr)
 			return
 		}
 	}
